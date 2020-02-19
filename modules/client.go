@@ -24,6 +24,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+
+	"github.com/gohugoio/hugo/hugofs"
 
 	"github.com/gohugoio/hugo/hugofs/files"
 
@@ -304,6 +307,33 @@ func (c *Client) Init(path string) error {
 	}
 
 	c.GoModulesFilename = filepath.Join(c.ccfg.WorkingDir, goModFilename)
+
+	return nil
+}
+
+var verifyErrorDirRe = regexp.MustCompile(`dir has been modified \((.*?)\)`)
+
+// Verify checks that the dependencies of the current module,
+// which are stored in a local downloaded source cache, have not been
+// modified since being downloaded.
+func (c *Client) Verify() error {
+	// TODO1 flag clean
+	// TODO1 add path to mod clean
+	err := c.runGo(context.Background(), os.Stdout, "mod", "verify")
+	if err != nil {
+		//fmt.Println("CACHE", c.ccfg.CacheDir)
+		//                         /var/folders/wy/g1rt5g3s5bd9flpq8g1741740000gn/T/hugo_cache/modules/filecache/modules
+		// dir has been modified (/var/folders/wy/g1rt5g3s5bd9flpq8g1741740000gn/T/hugo_cache/modules/filecache/modules/pkg/mod/github.com/alpinejs/alpine@v1.12.0)
+		m := verifyErrorDirRe.FindStringSubmatch(err.Error())
+		if len(m) > 1 {
+			c, err := hugofs.MakeReadableAndRemoveAll(c.fs, m[1])
+			if err != nil {
+				return err
+			}
+			fmt.Println("Cleaned", c)
+		}
+		//return errors.Wrap(err, "failed to verify modules")
+	}
 
 	return nil
 }

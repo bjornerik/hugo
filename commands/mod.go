@@ -185,6 +185,17 @@ If a module is vendored, that is where Hugo will look for it's dependencies.
 			},
 		},
 		&cobra.Command{
+			Use:   "verify",
+			Short: "Verify dependencies.",
+			Long: `Verify checks that the dependencies of the current module, which are stored in a local downloaded source cache, have not been modified since being downloaded.
+`,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return c.withModsClient(true, func(c *modules.Client) error {
+					return c.Verify()
+				})
+			},
+		},
+		&cobra.Command{
 			Use:   "tidy",
 			Short: "Remove unused entries in go.mod and go.sum.",
 			RunE: func(cmd *cobra.Command, args []string) error {

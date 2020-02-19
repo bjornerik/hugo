@@ -15,6 +15,7 @@
 package hugofs
 
 import (
+	"errors"
 	"os"
 
 	"github.com/gohugoio/hugo/config"
@@ -87,4 +88,26 @@ func getWorkingDirFs(base afero.Fs, cfg config.Provider) *afero.BasePathFs {
 
 func isWrite(flag int) bool {
 	return flag&os.O_RDWR != 0 || flag&os.O_WRONLY != 0
+}
+
+// MakeReadableAndRemoveAll makes any subdir in dir readable and then
+// removes the root.
+func MakeReadableAndRemoveAll(fs afero.Fs, dir string) (int, error) {
+	counter := 0
+	// Safe guard
+	if len(dir) < 5 {
+		return 0, errors.New("path too short")
+	}
+	afero.Walk(fs, dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			counter++
+			fs.Chmod(path, 0777)
+		}
+		return nil
+	})
+	return counter, fs.RemoveAll(dir)
+
 }
