@@ -194,6 +194,15 @@ Some **Markdown** in JSON shortcode.
 
 	b.CreateSites().Build(BuildCfg{})
 
+	//pm := b.H.Sites[0].pageMap
+	//pm.pages.printKeys()
+	//fmt.Println("SECTIONS")
+	//pm.sections.printKeys()
+
+	if true {
+		//return
+	}
+
 	b.AssertFileContent("public/blog/page1/index.html",
 		"This is content with some shortcodes.",
 		"Page with outputs",

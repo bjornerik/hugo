@@ -456,7 +456,10 @@ func (b *sourceFilesystemsBuilder) Build() (*SourceFilesystems, error) {
 	b.result.I18n = b.newSourceFilesystem(files.ComponentFolderI18n, i18nFs, i18nDirs)
 
 	contentDirs := b.theBigFs.overlayDirs[files.ComponentFolderContent]
-	contentBfs := afero.NewBasePathFs(b.theBigFs.overlayMountsContent, files.ComponentFolderContent)
+	contentBfs := hugofs.NewExtendedFs(
+		afero.NewBasePathFs(b.theBigFs.overlayMountsContent, files.ComponentFolderContent),
+		b.theBigFs.overlayMountsContent,
+	)
 
 	contentFs, err := hugofs.NewLanguageFs(b.p.LanguagesDefaultFirst.AsOrdinalSet(), contentBfs)
 	if err != nil {
@@ -688,8 +691,8 @@ type filesystemsCollector struct {
 	sourceModules afero.Fs // Source for modules/themes
 
 	overlayMounts        afero.Fs
-	overlayMountsContent afero.Fs
-	overlayMountsStatic  afero.Fs
+	overlayMountsContent hugofs.ExtendedFs
+	overlayMountsStatic  hugofs.ExtendedFs
 	overlayFull          afero.Fs
 	overlayResources     afero.Fs
 

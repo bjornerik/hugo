@@ -27,6 +27,27 @@ import (
 	"github.com/spf13/afero"
 )
 
+var _ ReverseLookupProvider = (*RootMappingFs)(nil)
+
+type ExtendedFs interface {
+	afero.Fs
+	ReverseLookupProvider
+}
+
+func NewExtendedFs(fs afero.Fs, rl ReverseLookupProvider) ExtendedFs {
+	return struct {
+		afero.Fs
+		ReverseLookupProvider
+	}{
+		fs,
+		rl,
+	}
+}
+
+type ReverseLookupProvider interface {
+	ReverseLookup(name string) (string, error)
+}
+
 var filepathSeparator = string(filepath.Separator)
 
 // NewRootMappingFs creates a new RootMappingFs on top of the provided with
@@ -34,7 +55,19 @@ var filepathSeparator = string(filepath.Separator)
 // Note that From represents a virtual root that maps to the actual filename in To.
 func NewRootMappingFs(fs afero.Fs, rms ...RootMapping) (*RootMappingFs, error) {
 	rootMapToReal := radix.New()
+	realMapToRoot := radix.New()
 	var virtualRoots []RootMapping
+
+	addMapping := func(key string, rm RootMapping, to *radix.Tree) {
+		var mappings []RootMapping
+		v, found := to.Get(key)
+		if found {
+			// There may be more than one language pointing to the same root.
+			mappings = v.([]RootMapping)
+		}
+		mappings = append(mappings, rm)
+		to.Insert(key, mappings)
+	}
 
 	for _, rm := range rms {
 		(&rm).clean()
@@ -72,15 +105,8 @@ func NewRootMappingFs(fs afero.Fs, rms ...RootMapping) (*RootMappingFs, error) {
 
 		rm.fi = NewFileMetaInfo(fi, meta)
 
-		key := filepathSeparator + rm.From
-		var mappings []RootMapping
-		v, found := rootMapToReal.Get(key)
-		if found {
-			// There may be more than one language pointing to the same root.
-			mappings = v.([]RootMapping)
-		}
-		mappings = append(mappings, rm)
-		rootMapToReal.Insert(key, mappings)
+		addMapping(filepathSeparator+rm.From, rm, rootMapToReal)
+		addMapping(strings.TrimPrefix(rm.To, rm.ToBasedir), rm, realMapToRoot)
 
 		virtualRoots = append(virtualRoots, rm)
 	}
@@ -90,6 +116,7 @@ func NewRootMappingFs(fs afero.Fs, rms ...RootMapping) (*RootMappingFs, error) {
 	rfs := &RootMappingFs{
 		Fs:            fs,
 		rootMapToReal: rootMapToReal,
+		realMapToRoot: realMapToRoot,
 	}
 
 	return rfs, nil
@@ -148,6 +175,7 @@ func (r RootMapping) filename(name string) string {
 type RootMappingFs struct {
 	afero.Fs
 	rootMapToReal *radix.Tree
+	realMapToRoot *radix.Tree
 }
 
 func (fs *RootMappingFs) Dirs(base string) ([]FileMetaInfo, error) {
@@ -234,6 +262,21 @@ func (fs *RootMappingFs) Stat(name string) (os.FileInfo, error) {
 	return fi, err
 }
 
+func (fs *RootMappingFs) ReverseLookup(name string) (string, error) {
+	name = fs.cleanName(name)
+	key := filepathSeparator + name
+	s, roots := fs.getRootsReverse(key)
+
+	if roots == nil {
+		// TODO1 lang
+		return "", nil
+	}
+
+	first := roots[0]
+	key = strings.TrimPrefix(key, s)
+	return filepath.Join(first.path, key), nil
+}
+
 func (fs *RootMappingFs) hasPrefix(prefix string) bool {
 	hasPrefix := false
 	fs.rootMapToReal.WalkPrefix(prefix, func(b string, v interface{}) bool {
@@ -254,7 +297,15 @@ func (fs *RootMappingFs) getRoot(key string) []RootMapping {
 }
 
 func (fs *RootMappingFs) getRoots(key string) (string, []RootMapping) {
-	s, v, found := fs.rootMapToReal.LongestPrefix(key)
+	return fs.getRootsIn(key, fs.rootMapToReal)
+}
+
+func (fs *RootMappingFs) getRootsReverse(key string) (string, []RootMapping) {
+	return fs.getRootsIn(key, fs.realMapToRoot)
+}
+
+func (fs *RootMappingFs) getRootsIn(key string, tree *radix.Tree) (string, []RootMapping) {
+	s, v, found := tree.LongestPrefix(key)
 	if !found || (s == filepathSeparator && key != filepathSeparator) {
 		return "", nil
 	}

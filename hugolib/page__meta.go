@@ -657,7 +657,7 @@ func (p *pageMeta) noListAlways() bool {
 }
 
 func (p *pageMeta) getListFilter(local bool) contentTreeNodeCallback {
-	return newContentTreeFilter(func(n *contentNode) bool {
+	return func(s string, n *contentNode) bool {
 		if n == nil {
 			return true
 		}
@@ -673,7 +673,7 @@ func (p *pageMeta) getListFilter(local bool) contentTreeNodeCallback {
 		}
 
 		return !shouldList
-	})
+	}
 }
 
 func (p *pageMeta) noRender() bool {

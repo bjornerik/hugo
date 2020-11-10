@@ -251,11 +251,6 @@ func (s *Site) prepareInits() {
 	})
 
 	s.init.prevNextInSection = init.Branch(func() (interface{}, error) {
-		var sections page.Pages
-		s.home.treeRef.m.collectSectionsRecursiveIncludingSelf(pageMapQuery{Prefix: s.home.treeRef.key}, func(n *contentNode) {
-			sections = append(sections, n.p)
-		})
-
 		setNextPrev := func(pas page.Pages) {
 			for i, p := range pas {
 				np, ok := p.(nextPrevInSectionProvider)
@@ -281,28 +276,24 @@ func (s *Site) prepareInits() {
 			}
 		}
 
-		for _, sect := range sections {
-			treeRef := sect.(treeRefProvider).getTreeRef()
-
+		s.pageMap.WalkBranches(func(s string, b *contentBranchNode) bool {
+			if b.n.isTaxonomyNode() {
+				return false
+			}
+			if contentTreeNoListAlwaysFilter(s, b.n) {
+				return false
+			}
 			var pas page.Pages
-			treeRef.m.collectPages(pageMapQuery{Prefix: treeRef.key + cmBranchSeparator}, func(c *contentNode) {
-				pas = append(pas, c.p)
-			})
-			page.SortByDefault(pas)
-
+			b.pages.Walk(
+				contentTreeNoListAlwaysFilter,
+				func(s string, c *contentNode) bool {
+					pas = append(pas, c.p)
+					return false
+				},
+			)
 			setNextPrev(pas)
-		}
-
-		// The root section only goes one level down.
-		treeRef := s.home.getTreeRef()
-
-		var pas page.Pages
-		treeRef.m.collectPages(pageMapQuery{Prefix: treeRef.key + cmBranchSeparator}, func(c *contentNode) {
-			pas = append(pas, c.p)
+			return false
 		})
-		page.SortByDefault(pas)
-
-		setNextPrev(pas)
 
 		return nil, nil
 	})
@@ -328,9 +319,11 @@ func (s *Site) Menus() navigation.Menus {
 }
 
 func (s *Site) initRenderFormats() {
+
 	formatSet := make(map[string]bool)
 	formats := output.Formats{}
-	s.pageMap.pageTrees.WalkRenderable(func(s string, n *contentNode) bool {
+
+	s.pageMap.WalkPagesPrefixSection("", contentTreeNoRenderFilter, func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
 		for _, f := range n.p.m.configuredOutputFormats {
 			if !formatSet[f.Name] {
 				formats = append(formats, f)
@@ -354,6 +347,7 @@ func (s *Site) initRenderFormats() {
 
 	sort.Sort(formats)
 	s.renderFormats = formats
+
 }
 
 func (s *Site) GetRelatedDocsHandler() *page.RelatedDocsHandler {
@@ -1443,46 +1437,52 @@ func (s *Site) assembleMenus() {
 	sectionPagesMenu := s.Info.sectionPagesMenu
 
 	if sectionPagesMenu != "" {
-		s.pageMap.sections.Walk(func(s string, v interface{}) bool {
-			p := v.(*contentNode).p
-			if p.IsHome() {
-				return false
-			}
-			// From Hugo 0.22 we have nested sections, but until we get a
-			// feel of how that would work in this setting, let us keep
-			// this menu for the top level only.
-			id := p.Section()
-			if _, ok := flat[twoD{sectionPagesMenu, id}]; ok {
-				return false
-			}
+		panic("TODO1")
+		/*
+			s.pageMap.sections.Pages.Walk(func(s string, v interface{}) bool {
+				p := v.(*contentNode).p
+				if p.IsHome() {
+					return false
+				}
+				// From Hugo 0.22 we have nested sections, but until we get a
+				// feel of how that would work in this setting, let us keep
+				// this menu for the top level only.
+				id := p.Section()
+				if _, ok := flat[twoD{sectionPagesMenu, id}]; ok {
+					return false
+				}
 
-			me := navigation.MenuEntry{
-				Identifier: id,
-				Name:       p.LinkTitle(),
-				Weight:     p.Weight(),
-				Page:       p,
-			}
-			flat[twoD{sectionPagesMenu, me.KeyName()}] = &me
+				me := navigation.MenuEntry{
+					Identifier: id,
+					Name:       p.LinkTitle(),
+					Weight:     p.Weight(),
+					Page:       p,
+				}
+				flat[twoD{sectionPagesMenu, me.KeyName()}] = &me
 
-			return false
-		})
+				return false
+			})
+		*/
 	}
 
 	// Add menu entries provided by pages
-	s.pageMap.pageTrees.WalkRenderable(func(ss string, n *contentNode) bool {
-		p := n.p
+	panic("TODO1")
+	/*
+		s.pageMap.pageTrees.WalkRenderable(func(ss string, n *contentNode) bool {
+			p := n.p
 
-		for name, me := range p.pageMenus.menus() {
-			if _, ok := flat[twoD{name, me.KeyName()}]; ok {
-				err := p.wrapError(errors.Errorf("duplicate menu entry with identifier %q in menu %q", me.KeyName(), name))
-				s.Log.Warnln(err)
-				continue
+			for name, me := range p.pageMenus.menus() {
+				if _, ok := flat[twoD{name, me.KeyName()}]; ok {
+					err := p.wrapError(errors.Errorf("duplicate menu entry with identifier %q in menu %q", me.KeyName(), name))
+					s.Log.Warnln(err)
+					continue
+				}
+				flat[twoD{name, me.KeyName()}] = me
 			}
-			flat[twoD{name, me.KeyName()}] = me
-		}
 
-		return false
-	})
+			return false
+		})
+	*/
 
 	// Create Children Menus First
 	for _, e := range flat {
@@ -1554,17 +1554,19 @@ func (s *Site) resetBuildState(sourceChanged bool) {
 	s.init.Reset()
 
 	if sourceChanged {
-		s.pageMap.contentMap.pageReverseIndex.Reset()
-		s.PageCollections = newPageCollections(s.pageMap)
-		s.pageMap.withEveryBundlePage(func(p *pageState) bool {
-			p.pagePages = &pagePages{}
-			if p.bucket != nil {
-				p.bucket.pagesMapBucketPages = &pagesMapBucketPages{}
-			}
-			p.parent = nil
-			p.Scratcher = maps.NewScratcher()
-			return false
-		})
+		panic("TODO1")
+		/*		s.pageMap.contentMap.pageReverseIndex.Reset()
+				s.PageCollections = newPageCollections(s.pageMap)
+				s.pageMap.withEveryBundlePage(func(p *pageState) bool {
+					p.pagePages = &pagePages{}
+					if p.bucket != nil {
+						p.bucket.pagesMapBucketPages = &pagesMapBucketPages{}
+					}
+					p.parent = nil
+					p.Scratcher = maps.NewScratcher()
+					return false
+				})
+		*/
 	} else {
 		s.pageMap.withEveryBundlePage(func(p *pageState) bool {
 			p.Scratcher = maps.NewScratcher()

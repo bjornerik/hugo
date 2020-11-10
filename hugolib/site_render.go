@@ -58,6 +58,7 @@ func (s siteRenderContext) renderSingletonPages() bool {
 // renderPages renders pages each corresponding to a markdown file.
 // TODO(bep np doc
 func (s *Site) renderPages(ctx *siteRenderContext) error {
+
 	numWorkers := config.GetNumWorkerMultiplier()
 
 	results := make(chan error)
@@ -75,7 +76,7 @@ func (s *Site) renderPages(ctx *siteRenderContext) error {
 
 	cfg := ctx.cfg
 
-	s.pageMap.pageTrees.Walk(func(ss string, n *contentNode) bool {
+	s.pageMap.WalkPagesPrefixSection("", nil, func(branch *contentBranchNode, owner *contentNode, ss string, n *contentNode) bool {
 		if cfg.shouldRender(n.p) {
 			select {
 			case <-s.h.Done():
@@ -317,12 +318,13 @@ func (s *Site) renderRobotsTXT() error {
 // renderAliases renders shell pages that simply have a redirect in the header.
 func (s *Site) renderAliases() error {
 	var err error
-	s.pageMap.pageTrees.WalkLinkable(func(ss string, n *contentNode) bool {
+
+	s.pageMap.WalkPagesPrefixSection("", contentTreeNoLinkFilter, func(branch *contentBranchNode, owner *contentNode, ss string, n *contentNode) bool {
 		p := n.p
+
 		if len(p.Aliases()) == 0 {
 			return false
 		}
-
 		pathSeen := make(map[string]bool)
 
 		for _, of := range p.OutputFormats() {

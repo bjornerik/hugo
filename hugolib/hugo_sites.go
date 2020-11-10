@@ -453,14 +453,15 @@ func applyDeps(cfg deps.DepsCfg, sites ...*Site) error {
 			s.siteConfigConfig = siteConfig
 
 			pm := &pageMap{
-				contentMap: newContentMap(contentMapConfig{
+				cfg: contentMapConfig{
 					lang:                 s.Lang(),
 					taxonomyConfig:       s.siteCfg.taxonomiesConfig.Values(),
 					taxonomyDisabled:     !s.isEnabled(page.KindTerm),
 					taxonomyTermDisabled: !s.isEnabled(page.KindTaxonomy),
 					pageDisabled:         !s.isEnabled(page.KindPage),
-				}),
-				s: s,
+				},
+				s:          s,
+				sectionMap: newSectionMap(),
 			}
 
 			s.PageCollections = newPageCollections(pm)
@@ -755,20 +756,23 @@ func (h *HugoSites) renderCrossSitesRobotsTXT() error {
 }
 
 func (h *HugoSites) removePageByFilename(filename string) {
-	h.getContentMaps().withMaps(func(m *pageMap) error {
-		m.deleteBundleMatching(func(b *contentNode) bool {
-			if b.p == nil {
-				return false
-			}
+	panic("TODO1")
+	/*
+		h.getContentMaps().withMaps(func(m *pageMap) error {
+			m.deleteBundleMatching(func(b *contentNode) bool {
+				if b.p == nil {
+					return false
+				}
 
-			if b.fi == nil {
-				return false
-			}
+				if b.fi == nil {
+					return false
+				}
 
-			return b.fi.Meta().Filename() == filename
+				return b.fi.Meta().Filename() == filename
+			})
+			return nil
 		})
-		return nil
-	})
+	*/
 }
 
 func (h *HugoSites) createPageCollections() error {
@@ -796,14 +800,22 @@ func (h *HugoSites) createPageCollections() error {
 }
 
 func (s *Site) preparePagesForRender(isRenderingSite bool, idx int) error {
+
 	var err error
-	s.pageMap.withEveryBundlePage(func(p *pageState) bool {
+
+	walkErr := s.pageMap.withEveryBundlePage(func(p *pageState) bool {
 		if err = p.initOutputFormat(isRenderingSite, idx); err != nil {
 			return true
 		}
 		return false
 	})
-	return nil
+
+	if err == nil {
+		err = walkErr
+	}
+
+	return err
+
 }
 
 // Pages returns all pages for all sites.

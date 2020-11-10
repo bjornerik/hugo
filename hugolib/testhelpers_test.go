@@ -1012,6 +1012,21 @@ func dumpSPages(pages ...*pageState) {
 	}
 }
 
+func dumpPageMaps(h *HugoSites) {
+	panic("TODO1")
+	/*
+		for _, s := range h.Sites {
+			fmt.Println("________", s.Lang())
+			m := s.pageMap
+			fmt.Println("\nSections:\n____")
+			m.sections.printKeys()
+			fmt.Println("\nPages:\n____")
+			m.pages.printKeys()
+
+		}
+	*/
+}
+
 func printStringIndexes(s string) {
 	lines := strings.Split(s, "\n")
 	i := 0

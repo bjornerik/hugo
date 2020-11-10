@@ -97,11 +97,19 @@ func NewLanguageFs(langs map[string]int, fs afero.Fs) (afero.Fs, error) {
 		}
 	}
 
-	return &FilterFs{
+	ffs := &FilterFs{
 		fs:             fs,
 		applyPerSource: applyMeta,
 		applyAll:       all,
-	}, nil
+	}
+
+	if rfs, ok := fs.(ReverseLookupProvider); ok {
+		// Preserve that interface.
+		return NewExtendedFs(ffs, rfs), nil
+	}
+
+	return ffs, nil
+
 }
 
 func NewFilterFs(fs afero.Fs) (afero.Fs, error) {
@@ -116,6 +124,11 @@ func NewFilterFs(fs afero.Fs) (afero.Fs, error) {
 	ffs := &FilterFs{
 		fs:             fs,
 		applyPerSource: applyMeta,
+	}
+
+	if rfs, ok := fs.(ReverseLookupProvider); ok {
+		// Preserve that interface.
+		return NewExtendedFs(ffs, rfs), nil
 	}
 
 	return ffs, nil

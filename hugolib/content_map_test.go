@@ -15,294 +15,155 @@ package hugolib
 
 import (
 	"fmt"
-	"path/filepath"
-	"strings"
 	"testing"
-
-	"github.com/gohugoio/hugo/helpers"
-
-	"github.com/gohugoio/hugo/htesting/hqt"
-
-	"github.com/gohugoio/hugo/hugofs/files"
-
-	"github.com/gohugoio/hugo/hugofs"
-	"github.com/spf13/afero"
 
 	qt "github.com/frankban/quicktest"
 )
 
 func BenchmarkContentMap(b *testing.B) {
-	writeFile := func(c *qt.C, fs afero.Fs, filename, content string) hugofs.FileMetaInfo {
-		c.Helper()
-		filename = filepath.FromSlash(filename)
-		c.Assert(fs.MkdirAll(filepath.Dir(filename), 0777), qt.IsNil)
-		c.Assert(afero.WriteFile(fs, filename, []byte(content), 0777), qt.IsNil)
+	// TODO1
+	/*
+		writeFile := func(c *qt.C, fs afero.Fs, filename, content string) hugofs.FileMetaInfo {
+			c.Helper()
+			filename = filepath.FromSlash(filename)
+			c.Assert(fs.MkdirAll(filepath.Dir(filename), 0777), qt.IsNil)
+			c.Assert(afero.WriteFile(fs, filename, []byte(content), 0777), qt.IsNil)
 
-		fi, err := fs.Stat(filename)
-		c.Assert(err, qt.IsNil)
+			fi, err := fs.Stat(filename)
+			c.Assert(err, qt.IsNil)
 
-		mfi := fi.(hugofs.FileMetaInfo)
-		return mfi
-	}
+			mfi := fi.(hugofs.FileMetaInfo)
+			return mfi
+		}
 
-	createFs := func(fs afero.Fs, lang string) afero.Fs {
-		return hugofs.NewBaseFileDecorator(fs,
-			func(fi hugofs.FileMetaInfo) {
-				meta := fi.Meta()
-				// We have a more elaborate filesystem setup in the
-				// real flow, so simulate this here.
-				meta["lang"] = lang
-				meta["path"] = meta.Filename()
-				meta["classifier"] = files.ClassifyContentFile(fi.Name(), meta.GetOpener())
-			})
-	}
+		createFs := func(fs afero.Fs, lang string) afero.Fs {
+			return hugofs.NewBaseFileDecorator(fs,
+				func(fi hugofs.FileMetaInfo) {
+					meta := fi.Meta()
+					// We have a more elaborate filesystem setup in the
+					// real flow, so simulate this here.
+					meta["lang"] = lang
+					meta["path"] = meta.Filename()
+					meta["classifier"] = files.ClassifyContentFile(fi.Name(), meta.GetOpener())
+				})
+		}
 
-	b.Run("CreateMissingNodes", func(b *testing.B) {
-		c := qt.New(b)
-		b.StopTimer()
-		mps := make([]*contentMap, b.N)
-		for i := 0; i < b.N; i++ {
-			m := newContentMap(contentMapConfig{lang: "en"})
-			mps[i] = m
-			memfs := afero.NewMemMapFs()
-			fs := createFs(memfs, "en")
-			for i := 1; i <= 20; i++ {
-				c.Assert(m.AddFilesBundle(writeFile(c, fs, fmt.Sprintf("sect%d/a/index.md", i), "page")), qt.IsNil)
-				c.Assert(m.AddFilesBundle(writeFile(c, fs, fmt.Sprintf("sect2%d/%sindex.md", i, strings.Repeat("b/", i)), "page")), qt.IsNil)
+		b.Run("CreateMissingNodes", func(b *testing.B) {
+			c := qt.New(b)
+			b.StopTimer()
+			mps := make([]*contentMap, b.N)
+			for i := 0; i < b.N; i++ {
+				m := newContentMap(contentMapConfig{lang: "en"})
+				mps[i] = m
+				memfs := afero.NewMemMapFs()
+				fs := createFs(memfs, "en")
+				for i := 1; i <= 20; i++ {
+					c.Assert(m.AddFilesBundle(writeFile(c, fs, fmt.Sprintf("sect%d/a/index.md", i), "page")), qt.IsNil)
+					c.Assert(m.AddFilesBundle(writeFile(c, fs, fmt.Sprintf("sect2%d/%sindex.md", i, strings.Repeat("b/", i)), "page")), qt.IsNil)
+				}
+
 			}
 
-		}
-
-		b.StartTimer()
-
-		for i := 0; i < b.N; i++ {
-			m := mps[i]
-			c.Assert(m.CreateMissingNodes(), qt.IsNil)
-
-			b.StopTimer()
-			m.pages.DeletePrefix("/")
-			m.sections.DeletePrefix("/")
 			b.StartTimer()
-		}
-	})
+
+			for i := 0; i < b.N; i++ {
+				m := mps[i]
+				c.Assert(m.CreateMissingNodes(), qt.IsNil)
+
+				b.StopTimer()
+				m.pages.DeletePrefix("")
+				m.sections.DeletePrefix("")
+				b.StartTimer()
+			}
+		})
+	*/
 }
 
-func TestContentMap(t *testing.T) {
+// TODO1 remove this
+func TestContentMapStructure(t *testing.T) {
 	c := qt.New(t)
 
-	writeFile := func(c *qt.C, fs afero.Fs, filename, content string) hugofs.FileMetaInfo {
+	m := newContentMap(contentMapConfig{})
+
+	home := &contentNode{p: &pageState{}}
+	blog := &contentNode{p: &pageState{}}
+	blog_sub := &contentNode{p: &pageState{}}
+	blog_sub2 := &contentNode{p: &pageState{}}
+
+	posts := &contentNode{p: &pageState{}}
+	page1 := &contentNode{p: &pageState{}, section: "/blog"}
+	page2 := &contentNode{p: &pageState{}, section: "/blog"}
+	page3 := &contentNode{p: &pageState{}, section: "/"}
+	resource1 := &contentNode{p: &pageState{}}
+	resource2 := &contentNode{p: &pageState{}}
+
+	m.sections.Pages.Insert("", home)
+	m.sections.Pages.Insert("/b", blog)
+
+	m.sections.Pages.Insert("/a", blog)
+	m.sections.Pages.Insert("/aa/a", blog)
+	m.sections.Pages.Insert("/a/a", blog)
+
+	m.sections.Pages.Insert("/blo", blog)
+	m.sections.Pages.Insert("/blo/a", blog)
+	m.sections.Pages.Insert("/blo/a/b", blog)
+	m.sections.Pages.Insert("/blo/b", blog)
+
+	m.sections.Pages.Insert("/blog", blog)
+	m.sections.Pages.Insert("/blog/sub", blog_sub)
+	m.sections.Pages.Insert("/blog/sub/2", blog_sub)
+	m.sections.Pages.Insert("/bloa", blog)
+	m.sections.Pages.Insert("/blo/a", blog)
+	m.sections.Pages.Insert("/bloa/a", blog)
+
+	m.sections.Pages.Insert("/blog/sub/aaaaaaaaaaaaaa", blog_sub2)
+	m.sections.Pages.Insert("/blog/sub/aaaaaaaaa", blog_sub2)
+	m.sections.Pages.Insert("/blog/sub/aaaaaaaaa/bbbb", blog_sub2)
+
+	m.sections.Pages.Insert("/blog/sub2/", blog_sub2)
+
+	m.sections.Pages.Insert("/posts/", posts)
+	m.sections.Pages.Insert("/posts/c", posts)
+	m.pages.Pages.Insert("/blog/page1/", page1)
+	m.pages.Pages.Insert("/blog/page2/", page2)
+	m.pages.Pages.Insert("/page3/", page3)
+	m.pages.Resources.Insert("/blog/page2/resource1", resource1)
+	m.sections.Resources.Insert("/resource2", resource2)
+
+	/*checkGet := func(tree *contentTree, key string, expect interface{}) {
 		c.Helper()
-		filename = filepath.FromSlash(filename)
-		c.Assert(fs.MkdirAll(filepath.Dir(filename), 0777), qt.IsNil)
-		c.Assert(afero.WriteFile(fs, filename, []byte(content), 0777), qt.IsNil)
-
-		fi, err := fs.Stat(filename)
-		c.Assert(err, qt.IsNil)
-
-		mfi := fi.(hugofs.FileMetaInfo)
-		return mfi
+		v, _ := tree.Pages.Get(key)
+		c.Assert(v, qt.Equals, expect)
 	}
 
-	createFs := func(fs afero.Fs, lang string) afero.Fs {
-		return hugofs.NewBaseFileDecorator(fs,
-			func(fi hugofs.FileMetaInfo) {
-				meta := fi.Meta()
-				// We have a more elaborate filesystem setup in the
-				// real flow, so simulate this here.
-				meta["lang"] = lang
-				meta["path"] = meta.Filename()
-				meta["classifier"] = files.ClassifyContentFile(fi.Name(), meta.GetOpener())
-				meta["translationBaseName"] = helpers.Filename(fi.Name())
-			})
+	checkLongestPrefix := func(tree *contentTree, key string, expect interface{}) {
+		c.Helper()
+		s, v, _ := tree.Pages.LongestPrefix(key)
+		fmt.Println(key, "=>", s)
+		c.Assert(v, qt.Equals, expect)
+	}*/
+
+	checkWalkPrefix := func(tree *contentTree, prefix string, expect interface{}) {
+		c.Helper()
+		var keys []string
+		tree.Pages.WalkPrefix(prefix, func(s string, v interface{}) bool {
+			fmt.Println(s)
+			keys = append(keys, s)
+
+			return false
+		})
+
+		//c.Assert(keys, qt.DeepEquals, expect)
 	}
 
-	c.Run("AddFiles", func(c *qt.C) {
-		memfs := afero.NewMemMapFs()
+	tree := m.sections
+	//checkGet(tree, "", home)
+	//checkGet(tree, "/blog/", blog)
+	//checkLongestPrefix(tree, "/blog/foo", blog)
+	//checkLongestPrefix(tree, "/blog/sub", blog)
+	//checkLongestPrefix(tree, "/bar", home)
+	checkWalkPrefix(tree, "/", []string{"/blog/", "/blog/sub/", "/blog/sub2/", "/posts/"})
 
-		fsl := func(lang string) afero.Fs {
-			return createFs(memfs, lang)
-		}
-
-		fs := fsl("en")
-
-		header := writeFile(c, fs, "blog/a/index.md", "page")
-
-		c.Assert(header.Meta().Lang(), qt.Equals, "en")
-
-		resources := []hugofs.FileMetaInfo{
-			writeFile(c, fs, "blog/a/b/data.json", "data"),
-			writeFile(c, fs, "blog/a/logo.png", "image"),
-		}
-
-		m := newContentMap(contentMapConfig{lang: "en"})
-
-		c.Assert(m.AddFilesBundle(header, resources...), qt.IsNil)
-
-		c.Assert(m.AddFilesBundle(writeFile(c, fs, "blog/b/c/index.md", "page")), qt.IsNil)
-
-		c.Assert(m.AddFilesBundle(
-			writeFile(c, fs, "blog/_index.md", "section page"),
-			writeFile(c, fs, "blog/sectiondata.json", "section resource"),
-		), qt.IsNil)
-
-		got := m.testDump()
-
-		expect := `
-          Tree 0:
-              	/blog/__hb_a__hl_
-              	/blog/__hb_b/c__hl_
-              Tree 1:
-              	/blog/
-              Tree 2:
-              	/blog/__hb_a__hl_b/data.json
-              	/blog/__hb_a__hl_logo.png
-              	/blog/__hl_sectiondata.json
-              en/pages/blog/__hb_a__hl_|f:blog/a/index.md
-              	 - R: blog/a/b/data.json
-              	 - R: blog/a/logo.png
-              en/pages/blog/__hb_b/c__hl_|f:blog/b/c/index.md
-              en/sections/blog/|f:blog/_index.md
-              	 - P: blog/a/index.md
-              	 - P: blog/b/c/index.md
-              	 - R: blog/sectiondata.json
-    
-`
-
-		c.Assert(got, hqt.IsSameString, expect, qt.Commentf(got))
-
-		// Add a data file to the section bundle
-		c.Assert(m.AddFiles(
-			writeFile(c, fs, "blog/sectiondata2.json", "section resource"),
-		), qt.IsNil)
-
-		// And then one to the leaf bundles
-		c.Assert(m.AddFiles(
-			writeFile(c, fs, "blog/a/b/data2.json", "data2"),
-		), qt.IsNil)
-
-		c.Assert(m.AddFiles(
-			writeFile(c, fs, "blog/b/c/d/data3.json", "data3"),
-		), qt.IsNil)
-
-		got = m.testDump()
-
-		expect = `
-			 Tree 0:
-              	/blog/__hb_a__hl_
-              	/blog/__hb_b/c__hl_
-              Tree 1:
-              	/blog/
-              Tree 2:
-              	/blog/__hb_a__hl_b/data.json
-              	/blog/__hb_a__hl_b/data2.json
-              	/blog/__hb_a__hl_logo.png
-              	/blog/__hb_b/c__hl_d/data3.json
-              	/blog/__hl_sectiondata.json
-              	/blog/__hl_sectiondata2.json
-              en/pages/blog/__hb_a__hl_|f:blog/a/index.md
-              	 - R: blog/a/b/data.json
-              	 - R: blog/a/b/data2.json
-              	 - R: blog/a/logo.png
-              en/pages/blog/__hb_b/c__hl_|f:blog/b/c/index.md
-              	 - R: blog/b/c/d/data3.json
-              en/sections/blog/|f:blog/_index.md
-              	 - P: blog/a/index.md
-              	 - P: blog/b/c/index.md
-              	 - R: blog/sectiondata.json
-              	 - R: blog/sectiondata2.json
-             
-`
-
-		c.Assert(got, hqt.IsSameString, expect, qt.Commentf(got))
-
-		// Add a regular page (i.e. not a bundle)
-		c.Assert(m.AddFilesBundle(writeFile(c, fs, "blog/b.md", "page")), qt.IsNil)
-
-		c.Assert(m.testDump(), hqt.IsSameString, `
-		 Tree 0:
-              	/blog/__hb_a__hl_
-              	/blog/__hb_b/c__hl_
-              	/blog/__hb_b__hl_
-              Tree 1:
-              	/blog/
-              Tree 2:
-              	/blog/__hb_a__hl_b/data.json
-              	/blog/__hb_a__hl_b/data2.json
-              	/blog/__hb_a__hl_logo.png
-              	/blog/__hb_b/c__hl_d/data3.json
-              	/blog/__hl_sectiondata.json
-              	/blog/__hl_sectiondata2.json
-              en/pages/blog/__hb_a__hl_|f:blog/a/index.md
-              	 - R: blog/a/b/data.json
-              	 - R: blog/a/b/data2.json
-              	 - R: blog/a/logo.png
-              en/pages/blog/__hb_b/c__hl_|f:blog/b/c/index.md
-              	 - R: blog/b/c/d/data3.json
-              en/pages/blog/__hb_b__hl_|f:blog/b.md
-              en/sections/blog/|f:blog/_index.md
-              	 - P: blog/a/index.md
-              	 - P: blog/b/c/index.md
-              	 - P: blog/b.md
-              	 - R: blog/sectiondata.json
-              	 - R: blog/sectiondata2.json
-             
-       
-				`, qt.Commentf(m.testDump()))
-	})
-
-	c.Run("CreateMissingNodes", func(c *qt.C) {
-		memfs := afero.NewMemMapFs()
-
-		fsl := func(lang string) afero.Fs {
-			return createFs(memfs, lang)
-		}
-
-		fs := fsl("en")
-
-		m := newContentMap(contentMapConfig{lang: "en"})
-
-		c.Assert(m.AddFilesBundle(writeFile(c, fs, "blog/page.md", "page")), qt.IsNil)
-		c.Assert(m.AddFilesBundle(writeFile(c, fs, "blog/a/index.md", "page")), qt.IsNil)
-		c.Assert(m.AddFilesBundle(writeFile(c, fs, "bundle/index.md", "page")), qt.IsNil)
-
-		c.Assert(m.CreateMissingNodes(), qt.IsNil)
-
-		got := m.testDump()
-
-		c.Assert(got, hqt.IsSameString, `
-			
-			 Tree 0:
-              	/__hb_bundle__hl_
-              	/blog/__hb_a__hl_
-              	/blog/__hb_page__hl_
-              Tree 1:
-              	/
-              	/blog/
-              Tree 2:
-              en/pages/__hb_bundle__hl_|f:bundle/index.md
-              en/pages/blog/__hb_a__hl_|f:blog/a/index.md
-              en/pages/blog/__hb_page__hl_|f:blog/page.md
-              en/sections/
-              	 - P: bundle/index.md
-              en/sections/blog/
-              	 - P: blog/a/index.md
-              	 - P: blog/page.md
-            
-			`, qt.Commentf(got))
-	})
-
-	c.Run("cleanKey", func(c *qt.C) {
-		for _, test := range []struct {
-			in       string
-			expected string
-		}{
-			{"/a/b/", "/a/b"},
-			{filepath.FromSlash("/a/b/"), "/a/b"},
-			{"/a//b/", "/a/b"},
-		} {
-			c.Assert(cleanTreeKey(test.in), qt.Equals, test.expected)
-		}
-	})
 }
 
 func TestContentMapSite(t *testing.T) {

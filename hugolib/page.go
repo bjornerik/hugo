@@ -155,46 +155,44 @@ func (p *pageState) GetTerms(taxonomy string) page.Pages {
 		return nil
 	}
 
-	m := p.s.pageMap
+	panic("TODO1 GetTerms")
+	/*
+			m := p.s.pageMap
 
-	taxonomy = strings.ToLower(taxonomy)
-	prefix := cleanSectionTreeKey(taxonomy)
-	self := strings.TrimPrefix(p.treeRef.key, "/")
+			taxonomy = strings.ToLower(taxonomy)
+			prefix := cleanTreeKey(taxonomy)
+			self := strings.TrimPrefix(p.treeRef.key, "/")
 
-	var pas page.Pages
+			var pas page.Pages
 
-	m.taxonomies.WalkQuery(pageMapQuery{Prefix: prefix}, func(s string, n *contentNode) bool {
-		key := s + self
-		if tn, found := m.taxonomyEntries.Get(key); found {
-			vi := tn.(*contentNode).viewInfo
-			pas = append(pas, pageWithOrdinal{pageState: n.p, ordinal: vi.ordinal})
-		}
-		return false
-	})
 
-	page.SortByDefault(pas)
+				m.taxonomies.WalkQuery(pageMapQuery{Prefix: prefix}, func(s string, n *contentNode) bool {
+					key := s + self
+					if tn, found := m.taxonomyEntries.Pages.Get(key); found {
+						vi := tn.(*contentNode).viewInfo
+						pas = append(pas, pageWithOrdinal{pageState: n.p, ordinal: vi.ordinal})
+					}
+					return false
+				})
+				page.SortByDefault(pas)
 
-	return pas
+		return pas
+	*/
+
+	return nil
+
 }
 
 func (p *pageState) MarshalJSON() ([]byte, error) {
 	return page.MarshalPageToJSON(p)
 }
 
-func (p *pageState) getPages() page.Pages {
+func (p *pageState) getRegularPagesRecursive() page.Pages {
 	b := p.bucket
 	if b == nil {
 		return nil
 	}
-	return b.getPages()
-}
-
-func (p *pageState) getPagesRecursive() page.Pages {
-	b := p.bucket
-	if b == nil {
-		return nil
-	}
-	return b.getPagesRecursive()
+	return b.getRegularPagesRecursive()
 }
 
 func (p *pageState) getPagesAndSections() page.Pages {
@@ -210,7 +208,7 @@ func (p *pageState) RegularPagesRecursive() page.Pages {
 		var pages page.Pages
 		switch p.Kind() {
 		case page.KindSection:
-			pages = p.getPagesRecursive()
+			pages = p.getRegularPagesRecursive()
 		default:
 			pages = p.RegularPages()
 		}
@@ -230,7 +228,7 @@ func (p *pageState) RegularPages() page.Pages {
 		switch p.Kind() {
 		case page.KindPage:
 		case page.KindSection, page.KindHome, page.KindTaxonomy:
-			pages = p.getPages()
+			pages = p.getPagesAndSections()
 		case page.KindTerm:
 			all := p.Pages()
 			for _, p := range all {
@@ -249,6 +247,7 @@ func (p *pageState) RegularPages() page.Pages {
 }
 
 func (p *pageState) Pages() page.Pages {
+	defer herrors.Recover() // TODO1
 	p.pagesInit.Do(func() {
 		var pages page.Pages
 
@@ -451,8 +450,8 @@ func (p *pageState) getLayoutDescriptor() output.LayoutDescriptor {
 				section = sections[0]
 			}
 		case page.KindTaxonomy, page.KindTerm:
-			b := p.getTreeRef().n
-			section = b.viewInfo.name.singular
+			// TODO1 b := p.getTreeRef().n
+			section = "foo" //b.n.viewInfo.name.singular
 		default:
 		}
 

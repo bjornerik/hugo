@@ -36,7 +36,7 @@ func (p *pageData) Data() interface{} {
 
 		switch p.Kind() {
 		case page.KindTerm:
-			b := p.treeRef.n
+			b := p.treeRef.branch.n
 			name := b.viewInfo.name
 			termKey := b.viewInfo.termKey
 
@@ -47,7 +47,7 @@ func (p *pageData) Data() interface{} {
 			p.data["Plural"] = name.plural
 			p.data["Term"] = b.viewInfo.term()
 		case page.KindTaxonomy:
-			b := p.treeRef.n
+			b := p.treeRef.branch.n
 			name := b.viewInfo.name
 
 			p.data["Singular"] = name.singular

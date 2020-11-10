@@ -662,3 +662,18 @@ func AddTrailingSlash(path string) string {
 	}
 	return path
 }
+
+// AddLeadingSlash adds a leading Unix styled slash (/) if not already
+// there.
+func AddLeadingSlash(path string) string {
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return path
+}
+
+// AddLeadingAndTrailingSlash adds a leading and trailing Unix styled slash (/)
+// if not already there.
+func AddLeadingAndTrailingSlash(path string) string {
+	return AddTrailingSlash(AddLeadingSlash(path))
+}

@@ -20,10 +20,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/pkg/errors"
+
 	"github.com/gohugoio/hugo/helpers"
 
 	"github.com/gohugoio/hugo/resources/page"
-	"github.com/pkg/errors"
 
 	"github.com/gohugoio/hugo/hugofs/files"
 
@@ -32,30 +33,12 @@ import (
 	radix "github.com/armon/go-radix"
 )
 
-// We store the branch nodes in either the `sections` or `taxonomies` tree
-// with their path as a key; Unix style slashes, a leading and trailing slash.
-//
-// E.g. "/blog/" or "/categories/funny/"
-//
-// Pages that belongs to a section are stored in the `pages` tree below
-// the section name and a branch separator, e.g. "/blog/__hb_". A page is
-// given a key using the path below the section and the base filename with no extension
-// with a leaf separator added.
-//
-// For bundled pages (/mybundle/index.md), we use the folder name.
-//
-// An exmple of a full page key would be "/blog/__hb_page1__hl_"
-//
-// Bundled resources are stored in the `resources` having their path prefixed
-// with the bundle they belong to, e.g.
-// "/blog/__hb_bundle__hl_data.json".
-//
-// The weighted taxonomy entries extracted from page front matter are stored in
-// the `taxonomyEntries` tree below /plural/term/page-key, e.g.
-// "/categories/funny/blog/__hb_bundle__hl_".
+// TODO1 remove one
 const (
-	cmBranchSeparator = "__hb_"
-	cmLeafSeparator   = "__hl_"
+	contentMapNodeSeparator = "/"
+	cmLeafSeparator         = "/"
+	// The home page.
+	contentMapRoot = ""
 )
 
 // Used to mark ambiguous keys in reverse index lookups.
@@ -64,19 +47,14 @@ var ambiguousContentNode = &contentNode{}
 func newContentMap(cfg contentMapConfig) *contentMap {
 	m := &contentMap{
 		cfg:             &cfg,
-		pages:           &contentTree{Name: "pages", Tree: radix.New()},
-		sections:        &contentTree{Name: "sections", Tree: radix.New()},
-		taxonomies:      &contentTree{Name: "taxonomies", Tree: radix.New()},
-		taxonomyEntries: &contentTree{Name: "taxonomyEntries", Tree: radix.New()},
-		resources:       &contentTree{Name: "resources", Tree: radix.New()},
+		pages:           newContentTree("pages"),
+		sections:        newContentTree("sections"),
+		taxonomies:      newContentTree("taxonomies"),
+		taxonomyEntries: newContentTree("taxonomyEntries"),
 	}
 
 	m.pageTrees = []*contentTree{
 		m.pages, m.sections, m.taxonomies,
-	}
-
-	m.bundleTrees = []*contentTree{
-		m.pages, m.sections, m.taxonomies, m.resources,
 	}
 
 	m.branchTrees = []*contentTree{
@@ -97,7 +75,7 @@ func newContentMap(cfg contentMapConfig) *contentMap {
 		t: []*contentTree{m.pages, m.sections, m.taxonomies},
 		contentTreeReverseIndexMap: &contentTreeReverseIndexMap{
 			initFn: func(t *contentTree, m map[interface{}]*contentNode) {
-				t.Walk(func(s string, v interface{}) bool {
+				t.Pages.Walk(func(s string, v interface{}) bool {
 					n := v.(*contentNode)
 					if n.p != nil && !n.p.File().IsZero() {
 						meta := n.p.File().FileInfo().Meta()
@@ -107,7 +85,7 @@ func newContentMap(cfg contentMapConfig) *contentMap {
 							addToReverseMap(mountKey, n, m)
 						}
 					}
-					k := strings.TrimPrefix(strings.TrimSuffix(path.Base(s), cmLeafSeparator), cmBranchSeparator)
+					k := strings.TrimPrefix(strings.TrimSuffix(path.Base(s), cmLeafSeparator), contentMapNodeSeparator)
 					addToReverseMap(k, n, m)
 					return false
 				})
@@ -116,153 +94,6 @@ func newContentMap(cfg contentMapConfig) *contentMap {
 	}
 
 	return m
-}
-
-type cmInsertKeyBuilder struct {
-	m *contentMap
-
-	err error
-
-	// Builder state
-	tree    *contentTree
-	baseKey string // Section or page key
-	key     string
-}
-
-func (b cmInsertKeyBuilder) ForPage(s string) *cmInsertKeyBuilder {
-	// fmt.Println("ForPage:", s, "baseKey:", b.baseKey, "key:", b.key)
-	baseKey := b.baseKey
-	b.baseKey = s
-
-	if baseKey != "/" {
-		// Don't repeat the section path in the key.
-		s = strings.TrimPrefix(s, baseKey)
-	}
-	s = strings.TrimPrefix(s, "/")
-
-	switch b.tree {
-	case b.m.sections:
-		b.tree = b.m.pages
-		b.key = baseKey + cmBranchSeparator + s + cmLeafSeparator
-	case b.m.taxonomies:
-		b.key = path.Join(baseKey, s)
-	default:
-		panic("invalid state")
-	}
-
-	return &b
-}
-
-func (b cmInsertKeyBuilder) ForResource(s string) *cmInsertKeyBuilder {
-	// fmt.Println("ForResource:", s, "baseKey:", b.baseKey, "key:", b.key)
-
-	baseKey := helpers.AddTrailingSlash(b.baseKey)
-	s = strings.TrimPrefix(s, baseKey)
-
-	switch b.tree {
-	case b.m.pages:
-		b.key = b.key + s
-	case b.m.sections, b.m.taxonomies:
-		b.key = b.key + cmLeafSeparator + s
-	default:
-		panic(fmt.Sprintf("invalid state: %#v", b.tree))
-	}
-	b.tree = b.m.resources
-	return &b
-}
-
-func (b *cmInsertKeyBuilder) Insert(n *contentNode) *cmInsertKeyBuilder {
-	if b.err == nil {
-		b.tree.Insert(b.Key(), n)
-	}
-	return b
-}
-
-func (b *cmInsertKeyBuilder) Key() string {
-	switch b.tree {
-	case b.m.sections, b.m.taxonomies:
-		return cleanSectionTreeKey(b.key)
-	default:
-		return cleanTreeKey(b.key)
-	}
-}
-
-func (b *cmInsertKeyBuilder) DeleteAll() *cmInsertKeyBuilder {
-	if b.err == nil {
-		b.tree.DeletePrefix(b.Key())
-	}
-	return b
-}
-
-func (b *cmInsertKeyBuilder) WithFile(fi hugofs.FileMetaInfo) *cmInsertKeyBuilder {
-	b.newTopLevel()
-	m := b.m
-	meta := fi.Meta()
-	p := cleanTreeKey(meta.Path())
-	bundlePath := m.getBundleDir(meta)
-	isBundle := meta.Classifier().IsBundle()
-	if isBundle {
-		panic("not implemented")
-	}
-
-	p, k := b.getBundle(p)
-	if k == "" {
-		b.err = errors.Errorf("no bundle header found for %q", bundlePath)
-		return b
-	}
-
-	id := k + m.reduceKeyPart(p, fi.Meta().Path())
-	b.tree = b.m.resources
-	b.key = id
-	b.baseKey = p
-
-	return b
-}
-
-func (b *cmInsertKeyBuilder) WithSection(s string) *cmInsertKeyBuilder {
-	s = cleanSectionTreeKey(s)
-	b.newTopLevel()
-	b.tree = b.m.sections
-	b.baseKey = s
-	b.key = s
-	return b
-}
-
-func (b *cmInsertKeyBuilder) WithTaxonomy(s string) *cmInsertKeyBuilder {
-	s = cleanSectionTreeKey(s)
-	b.newTopLevel()
-	b.tree = b.m.taxonomies
-	b.baseKey = s
-	b.key = s
-	return b
-}
-
-// getBundle gets both the key to the section and the prefix to where to store
-// this page bundle and its resources.
-func (b *cmInsertKeyBuilder) getBundle(s string) (string, string) {
-	m := b.m
-	section, _ := m.getSection(s)
-
-	p := strings.TrimPrefix(s, section)
-
-	bundlePathParts := strings.Split(p, "/")
-	basePath := section + cmBranchSeparator
-
-	// Put it into an existing bundle if found.
-	for i := len(bundlePathParts) - 2; i >= 0; i-- {
-		bundlePath := path.Join(bundlePathParts[:i]...)
-		searchKey := basePath + bundlePath + cmLeafSeparator
-		if _, found := m.pages.Get(searchKey); found {
-			return section + bundlePath, searchKey
-		}
-	}
-
-	// Put it into the section bundle.
-	return section, section + cmLeafSeparator
-}
-
-func (b *cmInsertKeyBuilder) newTopLevel() {
-	b.key = ""
 }
 
 type contentBundleViewInfo struct {
@@ -297,14 +128,32 @@ func (c *contentBundleViewInfo) term() string {
 	return c.termKey
 }
 
+// We store the branch nodes in either the `sections` or `taxonomies` tree
+// with their path as a key; Unix style slashes with leading, but no leading slash.
+//
+// E.g. "blog/" or "categories/funny/"
+//
+// The home page is stored in `sections` with an empty key, so the sections can
+// be fetched with:
+//
+//    sections.Get("") // => home page
+//    sections.Get("/blog") // => blog section
+//
+// Regular pages are stored in the `pages` tree and Resources in the respective
+// `resoures` tree.
+//
+// All share the same key structure, enabling a common pattern for navigating the data:
+//
+//    pages.Get("/blog/my-post")
+//    resources.WalkPrefix("/blog/my-post/, ...)
+//	  sections.WalkPrefix("/", ...) // /blog
+//    sections.LongestPrefix("/blog/my-post") // /blog
+//
 type contentMap struct {
 	cfg *contentMapConfig
 
 	// View of regular pages, sections, and taxonomies.
 	pageTrees contentTrees
-
-	// View of pages, sections, taxonomies, and resources.
-	bundleTrees contentTrees
 
 	// View of sections and taxonomies.
 	branchTrees contentTrees
@@ -329,9 +178,6 @@ type contentMap struct {
 
 	// Pages in a taxonomy.
 	taxonomyEntries *contentTree
-
-	// Resources stored per bundle below a common prefix, e.g. "/blog/post__hb_".
-	resources *contentTree
 }
 
 func (m *contentMap) AddFiles(fis ...hugofs.FileMetaInfo) error {
@@ -352,9 +198,11 @@ func (m *contentMap) AddFilesBundle(header hugofs.FileMetaInfo, resources ...hug
 		bundlePath = m.getBundleDir(meta)
 
 		n = m.newContentNodeFromFi(header)
-		b = m.newKeyBuilder()
 
 		section string
+		bundle  string
+
+		tree *contentTree
 	)
 
 	if isBranch {
@@ -370,37 +218,50 @@ func (m *contentMap) AddFilesBundle(header hugofs.FileMetaInfo, resources ...hug
 			}
 
 			n.viewInfo.ref = n
-			b.WithTaxonomy(section).Insert(n)
+			bundle = cleanTreeKey(section)
+			tree = m.taxonomies
+			m.taxonomies.Pages.Insert(bundle, n)
 		} else {
-			b.WithSection(section).Insert(n)
+			bundle = section
+			tree = m.sections
+			key := cleanTreeKey(section)
+			m.sections.Pages.Insert(key, n)
 		}
 	} else {
 		// A regular page. Attach it to its section.
+		// TODO1
 		section, _ = m.getOrCreateSection(n, bundlePath)
-		b = b.WithSection(section).ForPage(bundlePath).Insert(n)
+		n.section = section
+		bundle = cleanTreeKey(bundlePath)
+		m.pages.Pages.Insert(bundle, n)
+		tree = m.pages
 	}
 
 	if m.cfg.isRebuild {
 		// The resource owner will be either deleted or overwritten on rebuilds,
 		// but make sure we handle deletion of resources (images etc.) as well.
-		b.ForResource("").DeleteAll()
+		// TODO1 b.ForResource("").DeleteAll()
 	}
 
 	for _, r := range resources {
-		rb := b.ForResource(cleanTreeKey(r.Meta().Path()))
-		rb.Insert(&contentNode{fi: r})
+		key := cleanTreeKey(r.Meta().Path())
+		tree.Resources.Insert(key, &contentNode{fi: r})
 	}
 
 	return nil
 }
 
-func (m *contentMap) CreateMissingNodes() error {
+func (m *pageMap) CreateMissingNodes() error {
+	if m.s.Lang() == "no" {
+		//m.debug(m.s.Lang(), os.Stdout)
+	}
+	// TODO1 remove?
 	// Create missing home and root sections
-	rootSections := make(map[string]interface{})
+	/*rootSections := make(map[string]interface{})
 	trackRootSection := func(s string, b *contentNode) {
 		parts := strings.Split(s, "/")
 		if len(parts) > 2 {
-			root := strings.TrimSuffix(parts[1], cmBranchSeparator)
+			root := strings.TrimSuffix(parts[1], contentMapNodeSeparator)
 			if root != "" {
 				if _, found := rootSections[root]; !found {
 					rootSections[root] = b
@@ -409,24 +270,18 @@ func (m *contentMap) CreateMissingNodes() error {
 		}
 	}
 
-	m.sections.Walk(func(s string, v interface{}) bool {
-		n := v.(*contentNode)
-
-		if s == "/" {
-			return false
-		}
-
-		trackRootSection(s, n)
-		return false
+	m.Walk(sectionMapQuery{
+		Branch: sectionMapQueryCallBacks{
+			NoRecurse: false,
+			Key:       newSectionMapQueryKey(contentMapRoot, true),
+			Branch: func(s string, n *contentNode) bool {
+				trackRootSection(s, n)
+			},
+		},
 	})
 
-	m.pages.Walk(func(s string, v interface{}) bool {
-		trackRootSection(s, v.(*contentNode))
-		return false
-	})
-
-	if _, found := rootSections["/"]; !found {
-		rootSections["/"] = true
+	if _, found := rootSections[contentMapRoot]; !found {
+		rootSections[contentMapRoot] = true
 	}
 
 	for sect, v := range rootSections {
@@ -438,16 +293,16 @@ func (m *contentMap) CreateMissingNodes() error {
 				sectionPath = sectionPath[:firstSlash]
 			}
 		}
-		sect = cleanSectionTreeKey(sect)
-		_, found := m.sections.Get(sect)
+		sect = cleanTreeKey(sect)
+		_, found := m.main.Sections.Get(sect)
 		if !found {
-			m.sections.Insert(sect, &contentNode{path: sectionPath})
+			m.main.Sections.Insert(sect, newContentBranchNode(&contentNode{path: sectionPath}))
 		}
 	}
 
 	for _, view := range m.cfg.taxonomyConfig {
-		s := cleanSectionTreeKey(view.plural)
-		_, found := m.taxonomies.Get(s)
+		s := cleanTreeKey(view.plural)
+		_, found := m.taxonomies.Sections.Get(s)
 		if !found {
 			b := &contentNode{
 				viewInfo: &contentBundleViewInfo{
@@ -455,14 +310,26 @@ func (m *contentMap) CreateMissingNodes() error {
 				},
 			}
 			b.viewInfo.ref = b
-			m.taxonomies.Insert(s, b)
+			// TODO1 make a typed Insert
+			m.taxonomies.Sections.Insert(s, newContentBranchNode(b))
 		}
-	}
+	}*/
 
 	return nil
 }
 
 func (m *contentMap) getBundleDir(meta hugofs.FileMeta) string {
+	dir := cleanTreeKey(filepath.Dir(meta.Path()))
+
+	switch meta.Classifier() {
+	case files.ContentClassContent:
+		return path.Join(dir, meta.TranslationBaseName())
+	default:
+		return dir
+	}
+}
+
+func (m *pageMap) getBundleDir(meta hugofs.FileMeta) string {
 	dir := cleanTreeKey(filepath.Dir(meta.Path()))
 
 	switch meta.Classifier() {
@@ -480,8 +347,15 @@ func (m *contentMap) newContentNodeFromFi(fi hugofs.FileMetaInfo) *contentNode {
 	}
 }
 
-func (m *contentMap) getFirstSection(s string) (string, *contentNode) {
-	s = helpers.AddTrailingSlash(s)
+func (m *pageMap) newContentNodeFromFi(fi hugofs.FileMetaInfo) *contentNode {
+	return &contentNode{
+		fi: fi,
+		// TODO1 used for?
+		path: strings.TrimPrefix(filepath.ToSlash(fi.Meta().Path()), "/"),
+	}
+}
+
+func (m *sectionMap) getFirstSection(s string) (string, *contentNode) {
 	for {
 		k, v, found := m.sections.LongestPrefix(s)
 
@@ -489,17 +363,15 @@ func (m *contentMap) getFirstSection(s string) (string, *contentNode) {
 			return "", nil
 		}
 
-		if strings.Count(k, "/") <= 2 {
-			return k, v.(*contentNode)
+		// /blog
+		if strings.Count(k, "/") <= 1 {
+			return k, v.(*contentBranchNode).n
 		}
 
-		s = helpers.AddTrailingSlash(path.Dir(strings.TrimSuffix(s, "/")))
+		s = path.Dir(s)
 
 	}
-}
 
-func (m *contentMap) newKeyBuilder() *cmInsertKeyBuilder {
-	return &cmInsertKeyBuilder{m: m}
 }
 
 func (m *contentMap) getOrCreateSection(n *contentNode, s string) (string, *contentNode) {
@@ -510,30 +382,33 @@ func (m *contentMap) getOrCreateSection(n *contentNode, s string) (string, *cont
 
 	if k == "" {
 		mustCreate = true
-	} else if level > 1 && k == "/" {
+	} else if level > 1 && k == "" {
 		// We found the home section, but this page needs to be placed in
 		// the root, e.g. "/blog", section.
 		mustCreate = true
 	}
 
-	if mustCreate {
-		k = cleanSectionTreeKey(s[:strings.Index(s[1:], "/")+1])
-
-		b = &contentNode{
-			path: n.rootSection(),
-		}
-
-		m.sections.Insert(k, b)
+	if !mustCreate {
+		fmt.Println("::::", k)
+		return k, b
 	}
+
+	k = cleanTreeKey(s[:strings.Index(s[1:], "/")+1])
+
+	b = &contentNode{
+		path: n.rootSection(),
+	}
+
+	m.sections.Pages.Insert(k, b)
 
 	return k, b
 }
 
 func (m *contentMap) getPage(section, name string) *contentNode {
 	section = helpers.AddTrailingSlash(section)
-	key := section + cmBranchSeparator + name + cmLeafSeparator
+	key := helpers.AddTrailingSlash(section + name)
 
-	v, found := m.pages.Get(key)
+	v, found := m.pages.Pages.Get(key)
 	if found {
 		return v.(*contentNode)
 	}
@@ -543,7 +418,7 @@ func (m *contentMap) getPage(section, name string) *contentNode {
 func (m *contentMap) getSection(s string) (string, *contentNode) {
 	s = helpers.AddTrailingSlash(path.Dir(strings.TrimSuffix(s, "/")))
 
-	k, v, found := m.sections.LongestPrefix(s)
+	k, v, found := m.sections.Pages.LongestPrefix(s)
 
 	if found {
 		return k, v.(*contentNode)
@@ -553,13 +428,13 @@ func (m *contentMap) getSection(s string) (string, *contentNode) {
 
 func (m *contentMap) getTaxonomyParent(s string) (string, *contentNode) {
 	s = helpers.AddTrailingSlash(path.Dir(strings.TrimSuffix(s, "/")))
-	k, v, found := m.taxonomies.LongestPrefix(s)
+	k, v, found := m.taxonomies.Pages.LongestPrefix(s)
 
 	if found {
 		return k, v.(*contentNode)
 	}
 
-	v, found = m.sections.Get("/")
+	v, found = m.sections.Pages.Get("")
 	if found {
 		return s, v.(*contentNode)
 	}
@@ -568,105 +443,34 @@ func (m *contentMap) getTaxonomyParent(s string) (string, *contentNode) {
 }
 
 func (m *contentMap) addFile(fi hugofs.FileMetaInfo) error {
-	b := m.newKeyBuilder()
-	return b.WithFile(fi).Insert(m.newContentNodeFromFi(fi)).err
-}
-
-func cleanTreeKey(k string) string {
-	k = "/" + strings.ToLower(strings.Trim(path.Clean(filepath.ToSlash(k)), "./"))
-	return k
-}
-
-func cleanSectionTreeKey(k string) string {
-	k = cleanTreeKey(k)
-	if k != "/" {
-		k += "/"
+	key := cleanTreeKey(fi.Meta().Path())
+	_, tree := m.pageTrees.LongestPrefix(key)
+	if tree == nil {
+		return errors.Errorf("tree for %q not found", key)
 	}
+	tree.Resources.Insert(key, &contentNode{fi: fi})
+	return nil
+}
 
-	return k
+// The home page is represented with the zero string.
+// All other keys starts with a leading slash. No leading slash.
+// Slashes are Unix-style.
+func cleanTreeKey(k string) string {
+	k = strings.ToLower(strings.Trim(path.Clean(filepath.ToSlash(k)), "./"))
+	if k == "" || k == "/" {
+		return ""
+	}
+	return helpers.AddLeadingSlash(k)
 }
 
 func (m *contentMap) onSameLevel(s1, s2 string) bool {
 	return strings.Count(s1, "/") == strings.Count(s2, "/")
 }
 
-func (m *contentMap) deleteBundleMatching(matches func(b *contentNode) bool) {
-	// Check sections first
-	s := m.sections.getMatch(matches)
-	if s != "" {
-		m.deleteSectionByPath(s)
-		return
-	}
-
-	s = m.pages.getMatch(matches)
-	if s != "" {
-		m.deletePage(s)
-		return
-	}
-
-	s = m.resources.getMatch(matches)
-	if s != "" {
-		m.resources.Delete(s)
-	}
-}
-
-// Deletes any empty root section that's not backed by a content file.
-func (m *contentMap) deleteOrphanSections() {
-	var sectionsToDelete []string
-
-	m.sections.Walk(func(s string, v interface{}) bool {
-		n := v.(*contentNode)
-
-		if n.fi != nil {
-			// Section may be empty, but is backed by a content file.
-			return false
-		}
-
-		if s == "/" || strings.Count(s, "/") > 2 {
-			return false
-		}
-
-		prefixBundle := s + cmBranchSeparator
-
-		if !(m.sections.hasBelow(s) || m.pages.hasBelow(prefixBundle) || m.resources.hasBelow(prefixBundle)) {
-			sectionsToDelete = append(sectionsToDelete, s)
-		}
-
-		return false
-	})
-
-	for _, s := range sectionsToDelete {
-		m.sections.Delete(s)
-	}
-}
-
-func (m *contentMap) deletePage(s string) {
-	m.pages.DeletePrefix(s)
-	m.resources.DeletePrefix(s)
-}
-
-func (m *contentMap) deleteSectionByPath(s string) {
-	if !strings.HasSuffix(s, "/") {
-		panic("section must end with a slash")
-	}
-	if !strings.HasPrefix(s, "/") {
-		panic("section must start with a slash")
-	}
-	m.sections.DeletePrefix(s)
-	m.pages.DeletePrefix(s)
-	m.resources.DeletePrefix(s)
-}
-
 func (m *contentMap) deletePageByPath(s string) {
-	m.pages.Walk(func(s string, v interface{}) bool {
-		fmt.Println("S", s)
-
+	m.pages.Pages.Walk(func(s string, v interface{}) bool {
 		return false
 	})
-}
-
-func (m *contentMap) deleteTaxonomy(s string) {
-	m.taxonomies.DeletePrefix(s)
 }
 
 func (m *contentMap) reduceKeyPart(dir, filename string) string {
@@ -682,55 +486,6 @@ func (m *contentMap) splitKey(k string) []string {
 	}
 
 	return strings.Split(k, "/")[1:]
-}
-
-func (m *contentMap) testDump() string {
-	var sb strings.Builder
-
-	for i, r := range []*contentTree{m.pages, m.sections, m.resources} {
-		sb.WriteString(fmt.Sprintf("Tree %d:\n", i))
-		r.Walk(func(s string, v interface{}) bool {
-			sb.WriteString("\t" + s + "\n")
-			return false
-		})
-	}
-
-	for i, r := range []*contentTree{m.pages, m.sections} {
-		r.Walk(func(s string, v interface{}) bool {
-			c := v.(*contentNode)
-			cpToString := func(c *contentNode) string {
-				var sb strings.Builder
-				if c.p != nil {
-					sb.WriteString("|p:" + c.p.Title())
-				}
-				if c.fi != nil {
-					sb.WriteString("|f:" + filepath.ToSlash(c.fi.Meta().Path()))
-				}
-				return sb.String()
-			}
-			sb.WriteString(path.Join(m.cfg.lang, r.Name) + s + cpToString(c) + "\n")
-
-			resourcesPrefix := s
-
-			if i == 1 {
-				resourcesPrefix += cmLeafSeparator
-
-				m.pages.WalkPrefix(s+cmBranchSeparator, func(s string, v interface{}) bool {
-					sb.WriteString("\t - P: " + filepath.ToSlash((v.(*contentNode).fi.(hugofs.FileMetaInfo)).Meta().Filename()) + "\n")
-					return false
-				})
-			}
-
-			m.resources.WalkPrefix(resourcesPrefix, func(s string, v interface{}) bool {
-				sb.WriteString("\t - R: " + filepath.ToSlash((v.(*contentNode).fi.(hugofs.FileMetaInfo)).Meta().Filename()) + "\n")
-				return false
-			})
-
-			return false
-		})
-	}
-
-	return sb.String()
 }
 
 type contentMapConfig struct {
@@ -766,8 +521,17 @@ type contentNode struct {
 	// We will soon get other sources.
 	fi hugofs.FileMetaInfo
 
+	// The owning bundle key.
+	// TODO1 remove
+	section string
+
 	// The source path. Unix slashes. No leading slash.
 	path string
+}
+
+// Returns whether this is a taxonomy node (a taxonomy or a term).
+func (b *contentNode) isTaxonomyNode() bool {
+	return b.viewInfo != nil
 }
 
 func (b *contentNode) rootSection() string {
@@ -776,34 +540,170 @@ func (b *contentNode) rootSection() string {
 	}
 	firstSlash := strings.Index(b.path, "/")
 	if firstSlash == -1 {
-		return b.path
+		return ""
 	}
 	return b.path[:firstSlash]
 }
 
-type contentTree struct {
-	Name string
+// TODO1 names
+type ctree struct {
 	*radix.Tree
+}
+
+func (m *pageMap) AddFilesBundle(header hugofs.FileMetaInfo, resources ...hugofs.FileMetaInfo) error {
+	var (
+		meta       = header.Meta()
+		classifier = meta.Classifier()
+		isBranch   = classifier == files.ContentClassBranch
+		key        = cleanTreeKey(m.getBundleDir(meta))
+		n          = m.newContentNodeFromFi(header)
+
+		pageTree *contentBranchNode
+	)
+
+	if isBranch {
+		// Either a section or a taxonomy node.
+		if tc := m.cfg.getTaxonomyConfig(key); !tc.IsZero() {
+			term := strings.TrimPrefix(strings.TrimPrefix(key, "/"+tc.plural), "/")
+			n.viewInfo = &contentBundleViewInfo{
+				name:       tc,
+				termKey:    term,
+				termOrigin: term,
+			}
+
+			n.viewInfo.ref = n
+			pageTree = m.InsertSection(key, n)
+
+		} else {
+			key := cleanTreeKey(key)
+			pageTree = m.InsertSection(key, n)
+		}
+	} else {
+		// A regular page. Attach it to its section.
+		_, pageTree = m.getOrCreateSection(n, key)
+		if pageTree == nil {
+			panic(fmt.Sprintf("NO section %s", key))
+		}
+		pageTree.InsertPage(key, n)
+	}
+
+	if m.cfg.isRebuild {
+		// The resource owner will be either deleted or overwritten on rebuilds,
+		// but make sure we handle deletion of resources (images etc.) as well.
+		// TODO1 b.ForResource("").DeleteAll()
+	}
+
+	for _, r := range resources {
+		key := cleanTreeKey(r.Meta().Path())
+		pageTree.pageResources.nodes.Insert(key, &contentNode{fi: r})
+	}
+
+	return nil
+}
+
+func (m *pageMap) getOrCreateSection(n *contentNode, s string) (string, *contentBranchNode) {
+	level := strings.Count(s, "/")
+
+	k, pageTree := m.LongestPrefix(s)
+
+	mustCreate := false
+
+	if pageTree == nil {
+		mustCreate = true
+	} else if level > 1 && k == "" {
+		// We found the home section, but this page needs to be placed in
+		// the root, e.g. "/blog", section.
+		mustCreate = true
+	} else {
+		return k, pageTree
+	}
+
+	if !mustCreate {
+		return k, pageTree
+	}
+
+	k = cleanTreeKey(s[:strings.Index(s[1:], "/")+1])
+
+	n = &contentNode{
+		path: n.rootSection(), // TODO1
+	}
+
+	if k != "" {
+		// Make sure we always have the root/home node.
+		if m.Get("") == nil {
+			m.InsertSection("", &contentNode{})
+		}
+	}
+
+	pageTree = m.InsertSection(k, n)
+	return k, pageTree
+}
+
+type contentTree struct {
+	Name      string
+	Pages     *radix.Tree
+	Resources *radix.Tree
+}
+
+func newContentTree(name string) *contentTree {
+	return &contentTree{
+		Name:      name,
+		Pages:     radix.New(),
+		Resources: radix.New(),
+	}
 }
 
 type contentTrees []*contentTree
 
-func (t contentTrees) DeletePrefix(prefix string) int {
-	var count int
+func (t contentTrees) LongestPrefix(s string) (string, *contentTree) {
+	var matchKey string
+	var matchTree *contentTree
+
 	for _, tree := range t {
-		tree.Walk(func(s string, v interface{}) bool {
-			return false
-		})
-		count += tree.DeletePrefix(prefix)
+		p, _, found := tree.Pages.LongestPrefix(s)
+		if found && len(matchKey) > len(matchKey) {
+			matchKey = p
+			matchTree = tree
+		}
 	}
-	return count
+
+	return matchKey, matchTree
 }
 
+type contentTreeNodeFilter func(s string, n *contentNode) bool
 type contentTreeNodeCallback func(s string, n *contentNode) bool
+type contentTreeBranchNodeCallback func(s string, current *contentBranchNode) bool
 
-func newContentTreeFilter(fn func(n *contentNode) bool) contentTreeNodeCallback {
+type contentTreeOwnerNodeCallback func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool
+
+type walkContentTreeCallbacksO struct {
+	// Either of these may be nil, but not all.
+	page     contentTreeNodeCallback
+	leaf     contentTreeNodeCallback
+	branch   contentTreeBranchNodeCallback
+	resource contentTreeNodeCallback
+}
+
+func newcontentTreeNodeCallbackChain(callbacks ...contentTreeNodeCallback) contentTreeNodeCallback {
 	return func(s string, n *contentNode) bool {
-		return fn(n)
+		for i, cb := range callbacks {
+			// Allow the last callback to stop the walking.
+			if i == len(callbacks)-1 {
+				return cb(s, n)
+			}
+
+			if cb(s, n) {
+				// Skip the rest of the callbacks, but continue walking.
+				return false
+			}
+		}
+		return false
+	}
+}
+
+func newWalkContentTreeCallbacksPage(cb contentTreeNodeCallback) walkContentTreeCallbacksO {
+	return walkContentTreeCallbacksO{
+		page: cb,
 	}
 }
 
@@ -828,20 +728,29 @@ var (
 		}
 		return n.p.m.noLink()
 	}
+
+	contentTreeNoopFilter = func(s string, n *contentNode) bool {
+		return false
+	}
 )
 
-func (c *contentTree) WalkQuery(query pageMapQuery, walkFn contentTreeNodeCallback) {
-	filter := query.Filter
+func (c *ctree) WalkQuery(query pageMapQuery, walkFn contentTreeNodeCallback) {
+	/*filter := query.Filter
 	if filter == nil {
-		filter = contentTreeNoListAlwaysFilter
+		// TODO1 check callers
+		// TODO1 check if filter stop is needed.
+		//filter = contentTreeNoListAlwaysFilter
+		filter = contentTreeNoopFilter
 	}
-	if query.Prefix != "" {
-		c.WalkBelow(query.Prefix, func(s string, v interface{}) bool {
+
+	if query.Leaf != "" {
+		c.WalkPrefix(query.Leaf, func(s string, v interface{}) bool {
 			n := v.(*contentNode)
-			if filter != nil && filter(s, n) {
-				return false
+			skip, stop := filter(s, n)
+			if skip {
+				return stop
 			}
-			return walkFn(s, n)
+			return walkFn(s, n) || stop
 		})
 
 		return
@@ -849,30 +758,48 @@ func (c *contentTree) WalkQuery(query pageMapQuery, walkFn contentTreeNodeCallba
 
 	c.Walk(func(s string, v interface{}) bool {
 		n := v.(*contentNode)
-		if filter != nil && filter(s, n) {
-			return false
+		skip, stop := filter(s, n)
+		if skip {
+			return stop
 		}
-		return walkFn(s, n)
+		return walkFn(s, n) || stop
 	})
+	*/
 }
 
 func (c contentTrees) WalkRenderable(fn contentTreeNodeCallback) {
-	query := pageMapQuery{Filter: contentTreeNoRenderFilter}
-	for _, tree := range c {
-		tree.WalkQuery(query, fn)
-	}
+	panic("TODO1 WalkRenarable")
+	/*
+		query := pageMapQuery{Filter: contentTreeNoRenderFilter}
+		for _, tree := range c {
+			tree.WalkQuery(query, fn)
+		}
+	*/
 }
 
 func (c contentTrees) WalkLinkable(fn contentTreeNodeCallback) {
-	query := pageMapQuery{Filter: contentTreeNoLinkFilter}
+	panic("TODO1 WalkLinkable")
+	/*
+		query := pageMapQuery{Filter: contentTreeNoLinkFilter}
+		for _, tree := range c {
+			tree.WalkQuery(query, fn)
+		}
+	*/
+}
+
+func (c contentTrees) WalkPages(fn contentTreeNodeCallback) {
 	for _, tree := range c {
-		tree.WalkQuery(query, fn)
+		tree.Pages.Walk(func(s string, v interface{}) bool {
+			n := v.(*contentNode)
+			return fn(s, n)
+		})
 	}
 }
 
-func (c contentTrees) Walk(fn contentTreeNodeCallback) {
+func (c contentTrees) WalkPagesAndResources(fn contentTreeNodeCallback) {
+	c.WalkPages(fn)
 	for _, tree := range c {
-		tree.Walk(func(s string, v interface{}) bool {
+		tree.Resources.Walk(func(s string, v interface{}) bool {
 			n := v.(*contentNode)
 			return fn(s, n)
 		})
@@ -881,27 +808,16 @@ func (c contentTrees) Walk(fn contentTreeNodeCallback) {
 
 func (c contentTrees) WalkPrefix(prefix string, fn contentTreeNodeCallback) {
 	for _, tree := range c {
-		tree.WalkPrefix(prefix, func(s string, v interface{}) bool {
+		tree.Pages.WalkPrefix(prefix, func(s string, v interface{}) bool {
 			n := v.(*contentNode)
 			return fn(s, n)
 		})
 	}
 }
 
-// WalkBelow walks the tree below the given prefix, i.e. it skips the
-// node with the given prefix as key.
-func (c *contentTree) WalkBelow(prefix string, fn radix.WalkFn) {
-	c.Tree.WalkPrefix(prefix, func(s string, v interface{}) bool {
-		if s == prefix {
-			return false
-		}
-		return fn(s, v)
-	})
-}
-
 func (c *contentTree) getMatch(matches func(b *contentNode) bool) string {
 	var match string
-	c.Walk(func(s string, v interface{}) bool {
+	c.Pages.Walk(func(s string, v interface{}) bool {
 		n, ok := v.(*contentNode)
 		if !ok {
 			return false
@@ -920,7 +836,8 @@ func (c *contentTree) getMatch(matches func(b *contentNode) bool) string {
 
 func (c *contentTree) hasBelow(s1 string) bool {
 	var t bool
-	c.WalkBelow(s1, func(s2 string, v interface{}) bool {
+	s1 = helpers.AddTrailingSlash(s1)
+	c.Pages.WalkPrefix(s1, func(s2 string, v interface{}) bool {
 		t = true
 		return true
 	})
@@ -928,72 +845,69 @@ func (c *contentTree) hasBelow(s1 string) bool {
 }
 
 func (c *contentTree) printKeys() {
-	c.Walk(func(s string, v interface{}) bool {
-		fmt.Println(s)
+	c.Pages.Walk(func(s string, v interface{}) bool {
+		fmt.Print(s)
+		if n, ok := v.(*contentNode); ok {
+			fmt.Print(" - ", n.section)
+		}
+		fmt.Println()
 		return false
 	})
 }
 
 func (c *contentTree) printKeysPrefix(prefix string) {
-	c.WalkPrefix(prefix, func(s string, v interface{}) bool {
-		fmt.Println(s)
+	c.Pages.WalkPrefix(prefix, func(s string, v interface{}) bool {
 		return false
 	})
 }
 
-// contentTreeRef points to a node in the given tree.
+// contentTreeRef points to a branch node in the given map.
 type contentTreeRef struct {
-	m   *pageMap
-	t   *contentTree
-	n   *contentNode
+	m   *pageMap // TODO1 used?
+	branch   *contentBranchNode
 	key string
 }
 
 func (c *contentTreeRef) getCurrentSection() (string, *contentNode) {
 	if c.isSection() {
-		return c.key, c.n
+		return c.key, c.branch.n
 	}
 	return c.getSection()
 }
 
 func (c *contentTreeRef) isSection() bool {
-	return c.t == c.m.sections
+	panic("TODO1 isSection")
+	return false // c.t == c.m.sections
 }
 
 func (c *contentTreeRef) getSection() (string, *contentNode) {
-	if c.t == c.m.taxonomies {
-		return c.m.getTaxonomyParent(c.key)
-	}
-	return c.m.getSection(c.key)
+	panic("TODO1 getSection")
+	/*
+		if c.t == c.m.taxonomies {
+			return c.m.getTaxonomyParent(c.key)
+		}
+		return c.m.getSection(c.key)
+	*/
+	return "", nil
 }
 
-func (c *contentTreeRef) getPages() page.Pages {
-	var pas page.Pages
-	c.m.collectPages(
-		pageMapQuery{
-			Prefix: c.key + cmBranchSeparator,
-			Filter: c.n.p.m.getListFilter(true),
-		},
-		func(c *contentNode) {
-			pas = append(pas, c.p)
-		},
-	)
-	page.SortByDefault(pas)
-
-	return pas
-}
-
-func (c *contentTreeRef) getPagesRecursive() page.Pages {
+func (c *contentTreeRef) getRegularPagesRecursive() page.Pages {
 	var pas page.Pages
 
-	query := pageMapQuery{
-		Filter: c.n.p.m.getListFilter(true),
+	q := sectionMapQuery{
+		Filter: c.branch.n.p.m.getListFilter(true),
+		Branch: sectionMapQueryCallBacks{
+			Key: newSectionMapQueryKey(c.key+"/", true),
+		},
+		Leaf: sectionMapQueryCallBacks{
+			Page: func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+				pas = append(pas, n.p)
+				return false
+			},
+		},
 	}
 
-	query.Prefix = c.key
-	c.m.collectPages(query, func(c *contentNode) {
-		pas = append(pas, c.p)
-	})
+	c.m.Walk(q)
 
 	page.SortByDefault(pas)
 
@@ -1003,14 +917,15 @@ func (c *contentTreeRef) getPagesRecursive() page.Pages {
 func (c *contentTreeRef) getPagesAndSections() page.Pages {
 	var pas page.Pages
 
-	query := pageMapQuery{
-		Filter: c.n.p.m.getListFilter(true),
-		Prefix: c.key,
-	}
-
-	c.m.collectPagesAndSections(query, func(c *contentNode) {
-		pas = append(pas, c.p)
-	})
+	c.m.WalkPagesPrefixSectionNoRecurse(
+		c.key+"/",
+		c.branch.n.p.m.getListFilter(true),
+		func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+			//fmt.Println("===>", c.key, "=>", s)
+			pas = append(pas, n.p)
+			return false
+		},
+	)
 
 	page.SortByDefault(pas)
 
@@ -1020,14 +935,19 @@ func (c *contentTreeRef) getPagesAndSections() page.Pages {
 func (c *contentTreeRef) getSections() page.Pages {
 	var pas page.Pages
 
-	query := pageMapQuery{
-		Filter: c.n.p.m.getListFilter(true),
-		Prefix: c.key,
+	q := sectionMapQuery{
+		NoRecurse: true,
+		Filter:    c.branch.n.p.m.getListFilter(true),
+		Branch: sectionMapQueryCallBacks{
+			Key: newSectionMapQueryKey(c.key+"/", true),
+			Page: func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+				pas = append(pas, n.p)
+				return false
+			},
+		},
 	}
 
-	c.m.collectSections(query, func(c *contentNode) {
-		pas = append(pas, c.p)
-	})
+	c.m.Walk(q)
 
 	page.SortByDefault(pas)
 

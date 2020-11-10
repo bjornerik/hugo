@@ -20,9 +20,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/gohugoio/hugo/hugofs/files"
+	"github.com/gohugoio/hugo/hugofs"
 
-	"github.com/gohugoio/hugo/helpers"
+	"github.com/gohugoio/hugo/hugofs/files"
 
 	"github.com/gohugoio/hugo/resources/page"
 )
@@ -167,44 +167,52 @@ func (c *PageCollections) getPageNew(context page.Page, ref string) (page.Page, 
 }
 
 func (c *PageCollections) getSectionOrPage(ref string) (*contentNode, string) {
-	var n *contentNode
+	panic("TODO1")
+	/*
+		var n *contentNode
 
-	pref := helpers.AddTrailingSlash(ref)
-	s, v, found := c.pageMap.sections.LongestPrefix(pref)
+		pref := helpers.AddTrailingSlash(ref)
+		s, v, found := c.pageMap.sections.Pages.LongestPrefix(pref)
 
-	if found {
-		n = v.(*contentNode)
-	}
+		if found {
+			n = v.(*contentNode)
+		}
 
-	if found && s == pref {
-		// A section
-		return n, ""
-	}
+		if found && s == pref {
+			// A section
+			return n, ""
+		}
 
-	m := c.pageMap
+		m := c.pageMap
 
-	filename := strings.TrimPrefix(strings.TrimPrefix(ref, s), "/")
-	langSuffix := "." + m.s.Lang()
+		filename := strings.TrimPrefix(strings.TrimPrefix(ref, s), "/")
+		langSuffix := "." + m.s.Lang()
 
-	// Trim both extension and any language code.
-	name := helpers.PathNoExt(filename)
-	name = strings.TrimSuffix(name, langSuffix)
+		// Trim both extension and any language code.
+		name := helpers.PathNoExt(filename)
+		name = strings.TrimSuffix(name, langSuffix)
 
-	// These are reserved bundle names and will always be stored by their owning
-	// folder name.
-	name = strings.TrimSuffix(name, "/index")
-	name = strings.TrimSuffix(name, "/_index")
+		// These are reserved bundle names and will always be stored by their owning
+		// folder name.
+		name = strings.TrimSuffix(name, "/index")
+		name = strings.TrimSuffix(name, "/_index")
+		if name == "index" || name == "_index" {
+			name = ""
+		}
 
-	if !found {
-		return nil, name
-	}
+		if !found {
+			return nil, name
+		}
 
-	// Check if it's a section with filename provided.
-	if !n.p.File().IsZero() && n.p.File().LogicalName() == filename {
-		return n, name
-	}
+		// Check if it's a section with filename provided.
+		if !n.p.File().IsZero() && n.p.File().LogicalName() == filename {
+			return n, name
+		}
 
-	return m.getPage(s, name), name
+		return m.getPage(s, name), name
+
+	*/
+
 }
 
 // For Ref/Reflink and .Site.GetPage do simple name lookups for the potentially ambigous myarticle.md and /myarticle.md,
@@ -221,16 +229,11 @@ func shouldDoSimpleLookup(ref string) bool {
 	}
 
 	return slashCount == 0 || ref[0] == '/'
+
 }
 
 func (c *PageCollections) getContentNode(context page.Page, isReflink bool, ref string) (*contentNode, error) {
-	ref = filepath.ToSlash(strings.ToLower(strings.TrimSpace(ref)))
 
-	if ref == "" {
-		ref = "/"
-	}
-
-	inRef := ref
 	navUp := strings.HasPrefix(ref, "..")
 	var doSimpleLookup bool
 	if isReflink || context == nil {
@@ -254,66 +257,24 @@ func (c *PageCollections) getContentNode(context page.Page, isReflink bool, ref 
 				}
 			}
 		}
-		ref = path.Join("/", strings.ToLower(base), ref)
-	}
-
-	if !strings.HasPrefix(ref, "/") {
-		ref = "/" + ref
+		ref = path.Join(base, ref)
 	}
 
 	m := c.pageMap
 
-	// It's either a section, a page in a section or a taxonomy node.
-	// Start with the most likely:
-	n, name := c.getSectionOrPage(ref)
+	refKey := cleanTreeKey(ref)
+	n := m.GetPageNode(refKey)
 	if n != nil {
 		return n, nil
 	}
 
-	if !strings.HasPrefix(inRef, "/") {
-		// Many people will have "post/foo.md" in their content files.
-		if n, _ := c.getSectionOrPage("/" + inRef); n != nil {
-			return n, nil
-		}
+	rfs := m.s.BaseFs.Content.Fs.(hugofs.ReverseLookupProvider)
+	realToVirtual, err := rfs.ReverseLookup(refKey)
+	if err != nil {
+		return nil, err
 	}
-
-	// Check if it's a taxonomy node
-	pref := helpers.AddTrailingSlash(ref)
-	s, v, found := m.taxonomies.LongestPrefix(pref)
-
-	if found {
-		if !m.onSameLevel(pref, s) {
-			return nil, nil
-		}
-		return v.(*contentNode), nil
-	}
-
-	getByName := func(s string) (*contentNode, error) {
-		n := m.pageReverseIndex.Get(s)
-		if n != nil {
-			if n == ambiguousContentNode {
-				return nil, fmt.Errorf("page reference %q is ambiguous", ref)
-			}
-			return n, nil
-		}
-
-		return nil, nil
-	}
-
-	var module string
-	if context != nil && !context.File().IsZero() {
-		module = context.File().FileInfo().Meta().Module()
-	}
-
-	if module == "" && !c.pageMap.s.home.File().IsZero() {
-		module = c.pageMap.s.home.File().FileInfo().Meta().Module()
-	}
-
-	if module != "" {
-		n, err := getByName(module + ref)
-		if err != nil {
-			return nil, err
-		}
+	if realToVirtual != "" {
+		n := m.GetPageNode(cleanTreeKey(realToVirtual))
 		if n != nil {
 			return n, nil
 		}
@@ -323,8 +284,78 @@ func (c *PageCollections) getContentNode(context page.Page, isReflink bool, ref 
 		return nil, nil
 	}
 
-	// Ref/relref supports this potentially ambigous lookup.
-	return getByName(path.Base(name))
+	// TODO simple
+
+	/*
+
+
+		m := c.pageMap
+
+		// It's either a section, a page in a section or a taxonomy node.
+		// Start with the most likely:
+		n, name := c.getSectionOrPage(ref)
+		if n != nil {
+			return n, nil
+		}
+
+		if !strings.HasPrefix(inRef, "/") {
+			// Many people will have "post/foo.md" in their content files.
+			if n, _ := c.getSectionOrPage("/" + inRef); n != nil {
+				return n, nil
+			}
+		}
+
+		// Check if it's a taxonomy node
+		pref := helpers.AddTrailingSlash(ref)
+		s, v, found := m.taxonomies.Pages.LongestPrefix(pref)
+
+		if found {
+			if !m.onSameLevel(pref, s) {
+				return nil, nil
+			}
+			return v.(*contentNode), nil
+		}
+
+		getByName := func(s string) (*contentNode, error) {
+			n := m.pageReverseIndex.Get(s)
+			if n != nil {
+				if n == ambiguousContentNode {
+					return nil, fmt.Errorf("page reference %q is ambiguous", ref)
+				}
+				return n, nil
+			}
+
+			return nil, nil
+		}
+
+		var module string
+		if context != nil && !context.File().IsZero() {
+			module = context.File().FileInfo().Meta().Module()
+		}
+
+		if module == "" && !c.pageMap.s.home.File().IsZero() {
+			module = c.pageMap.s.home.File().FileInfo().Meta().Module()
+		}
+
+		if module != "" {
+			n, err := getByName(module + ref)
+			if err != nil {
+				return nil, err
+			}
+			if n != nil {
+				return n, nil
+			}
+		}
+
+		if !doSimpleLookup {
+			return nil, nil
+		}
+
+		// Ref/relref supports this potentially ambigous lookup.
+		return getByName(path.Base(name))
+	*/
+
+	return nil, nil
 }
 
 func (*PageCollections) findPagesByKindIn(kind string, inPages page.Pages) page.Pages {

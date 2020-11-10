@@ -21,9 +21,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/gohugoio/hugo/common/types"
+	"github.com/spf13/cast"
+
 	"github.com/gohugoio/hugo/common/maps"
 
-	"github.com/gohugoio/hugo/common/types"
 	"github.com/gohugoio/hugo/resources"
 
 	"github.com/gohugoio/hugo/common/hugio"
@@ -32,7 +34,6 @@ import (
 	"github.com/gohugoio/hugo/parser/pageparser"
 	"github.com/gohugoio/hugo/resources/page"
 	"github.com/gohugoio/hugo/resources/resource"
-	"github.com/spf13/cast"
 
 	"github.com/gohugoio/hugo/common/para"
 	"github.com/pkg/errors"
@@ -50,47 +51,60 @@ func newPageMaps(h *HugoSites) *pageMaps {
 }
 
 type pageMap struct {
-	s *Site
-	*contentMap
+	cfg contentMapConfig
+	s   *Site
+
+	*sectionMap
 }
 
 func (m *pageMap) Len() int {
-	l := 0
-	for _, t := range m.contentMap.pageTrees {
-		l += t.Len()
-	}
-	return l
+	panic("TODO1 Len")
+	/*
+		l := 0
+		for _, t := range m.contentMap.pageTrees {
+			l += t.Pages.Len()
+			l += t.Resources.Len()
+		}
+		return l
+	*/
+	return 0
 }
 
 func (m *pageMap) createMissingTaxonomyNodes() error {
 	if m.cfg.taxonomyDisabled {
 		return nil
 	}
-	m.taxonomyEntries.Walk(func(s string, v interface{}) bool {
-		n := v.(*contentNode)
-		vi := n.viewInfo
-		k := cleanSectionTreeKey(vi.name.plural + "/" + vi.termKey)
+	//panic("TODO1")
+	return nil
+	/*
+		m.taxonomyEntries.Pages.Walk(func(s string, v interface{}) bool {
+			n := v.(*contentNode)
+			vi := n.viewInfo
+			k := cleanTreeKey(vi.name.plural + "/" + vi.termKey)
 
-		if _, found := m.taxonomies.Get(k); !found {
-			vic := &contentBundleViewInfo{
-				name:       vi.name,
-				termKey:    vi.termKey,
-				termOrigin: vi.termOrigin,
+			if _, found := m.taxonomies.Pages.Get(k); !found {
+				vic := &contentBundleViewInfo{
+					name:       vi.name,
+					termKey:    vi.termKey,
+					termOrigin: vi.termOrigin,
+				}
+				m.taxonomies.Pages.Insert(k, &contentNode{viewInfo: vic})
 			}
-			m.taxonomies.Insert(k, &contentNode{viewInfo: vic})
-		}
-		return false
-	})
+			return false
+		})
+	*/
 
 	return nil
 }
 
-func (m *pageMap) newPageFromContentNode(n *contentNode, parentBucket *pagesMapBucket, owner *pageState) (*pageState, error) {
+func (m *contentBranchNode) newPageFromContentNode(
+	s *Site,
+	n *contentNode, parentBucket *pagesMapBucket, owner *pageState) (*pageState, error) {
 	if n.fi == nil {
 		panic("FileInfo must (currently) be set")
 	}
 
-	f, err := newFileInfo(m.s.SourceSpec, n.fi)
+	f, err := newFileInfo(s.SourceSpec, n.fi)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +115,6 @@ func (m *pageMap) newPageFromContentNode(n *contentNode, parentBucket *pagesMapB
 	}
 
 	bundled := owner != nil
-	s := m.s
 
 	sections := s.sectionsFromFile(f)
 
@@ -224,7 +237,7 @@ func (m *pageMap) newPageFromContentNode(n *contentNode, parentBucket *pagesMapB
 	return ps, nil
 }
 
-func (m *pageMap) newResource(fim hugofs.FileMetaInfo, owner *pageState) (resource.Resource, error) {
+func (m *contentBranchNode) newResource(fim hugofs.FileMetaInfo, owner *pageState) (resource.Resource, error) {
 	if owner == nil {
 		panic("owner is nil")
 	}
@@ -263,52 +276,54 @@ func (m *pageMap) newResource(fim hugofs.FileMetaInfo, owner *pageState) (resour
 }
 
 func (m *pageMap) createSiteTaxonomies() error {
-	m.s.taxonomies = make(TaxonomyList)
-	var walkErr error
-	m.taxonomies.Walk(func(s string, v interface{}) bool {
-		n := v.(*contentNode)
-		t := n.viewInfo
+	//panic("TODO1")
+	/*
+		m.s.taxonomies = make(TaxonomyList)
+		var walkErr error
+		m.taxonomies.Pages.Walk(func(s string, v interface{}) bool {
+			n := v.(*contentNode)
+			t := n.viewInfo
 
-		viewName := t.name
+			viewName := t.name
 
-		if t.termKey == "" {
-			m.s.taxonomies[viewName.plural] = make(Taxonomy)
-		} else {
-			taxonomy := m.s.taxonomies[viewName.plural]
-			if taxonomy == nil {
-				walkErr = errors.Errorf("missing taxonomy: %s", viewName.plural)
-				return true
+			if t.termKey == "" {
+				m.s.taxonomies[viewName.plural] = make(Taxonomy)
+			} else {
+				taxonomy := m.s.taxonomies[viewName.plural]
+				if taxonomy == nil {
+					walkErr = errors.Errorf("missing taxonomy: %s", viewName.plural)
+					return true
+				}
+				m.taxonomyEntries.Pages.WalkPrefix(s, func(ss string, v interface{}) bool {
+					b2 := v.(*contentNode)
+					info := b2.viewInfo
+					taxonomy.add(info.termKey, page.NewWeightedPage(info.weight, info.ref.p, n.p))
+
+					return false
+				})
 			}
-			m.taxonomyEntries.WalkPrefix(s, func(ss string, v interface{}) bool {
-				b2 := v.(*contentNode)
-				info := b2.viewInfo
-				taxonomy.add(info.termKey, page.NewWeightedPage(info.weight, info.ref.p, n.p))
 
-				return false
-			})
+			return false
+		})
+
+		for _, taxonomy := range m.s.taxonomies {
+			for _, v := range taxonomy {
+				v.Sort()
+			}
 		}
 
-		return false
-	})
-
-	for _, taxonomy := range m.s.taxonomies {
-		for _, v := range taxonomy {
-			v.Sort()
-		}
-	}
-
-	return walkErr
+		return walkErr
+	*/
+	return nil
 }
 
 func (m *pageMap) createListAllPages() page.Pages {
+
 	pages := make(page.Pages, 0)
 
-	m.contentMap.pageTrees.Walk(func(s string, n *contentNode) bool {
+	m.WalkPagesPrefixSection("", contentTreeNoListAlwaysFilter, func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
 		if n.p == nil {
 			panic(fmt.Sprintf("BUG: page not set for %q", s))
-		}
-		if contentTreeNoListAlwaysFilter(s, n) {
-			return false
 		}
 		pages = append(pages, n.p)
 		return false
@@ -316,14 +331,111 @@ func (m *pageMap) createListAllPages() page.Pages {
 
 	page.SortByDefault(pages)
 	return pages
+
+	return nil
+}
+
+const (
+	sectionHomeKey = ""
+	sectionZeroKey = "ZERO"
+)
+
+func (m *pageMap) assembleSections() error {
+	/*
+		var sectionsToDelete []string
+		var err error
+
+		m.sections.Pages.Walk(func(s string, v interface{}) bool {
+			n := v.(*contentNode)
+			var shouldBuild bool
+
+			defer func() {
+				// Make sure we always rebuild the view cache.
+				if shouldBuild && err == nil && n.p != nil {
+					m.attachPageToViews(s, n)
+					if n.p.IsHome() {
+						m.s.home = n.p
+					}
+				}
+			}()
+
+			sections := m.splitKey(s)
+
+			if n.p != nil {
+				if n.p.IsHome() {
+					m.s.home = n.p
+				}
+				shouldBuild = true
+				return false
+			}
+
+			var parent *contentNode
+			var parentBucket *pagesMapBucket
+
+			const homeKey = ""
+
+			if s != homeKey {
+				_, parent = m.getSection(s)
+				if parent == nil || parent.p == nil {
+					panic(fmt.Sprintf("BUG: parent not set for %q", s))
+				}
+			}
+
+			if parent != nil {
+				parentBucket = parent.p.bucket
+			}
+
+			kind := page.KindSection
+			if s == homeKey {
+				kind = page.KindHome
+			}
+
+			if n.fi != nil {
+				n.p, err = m.newPageFromContentNode(n, parentBucket, nil)
+				if err != nil {
+					return true
+				}
+			} else {
+				n.p = m.s.newPage(n, parentBucket, kind, "", sections...)
+			}
+
+			shouldBuild = m.s.shouldBuild(n.p)
+			if !shouldBuild {
+				sectionsToDelete = append(sectionsToDelete, s)
+				return false
+			}
+
+			n.p.treeRef = &contentTreeRef{
+				m:   m,
+				t:   m.sections,
+				n:   n,
+				key: s,
+			}
+
+			if err = m.assembleResources(s, n.p, parentBucket); err != nil {
+				return true
+			}
+
+			return false
+		})
+
+		for _, s := range sectionsToDelete {
+			m.deleteSectionByPath(s)
+		}
+
+		return err
+	*/
+	//	panic("TODO1")
+	return nil
 }
 
 func (m *pageMap) assemblePages() error {
-	m.taxonomyEntries.DeletePrefix("/")
+	// TODO1	m.taxonomyEntries.DeletePrefix("/")
 
-	if err := m.assembleSections(); err != nil {
+	/*if err := m.assembleSections(); err != nil {
 		return err
-	}
+		// TODO1
+	}*/
 
 	var err error
 
@@ -331,67 +443,188 @@ func (m *pageMap) assemblePages() error {
 		return err
 	}
 
-	m.pages.Walk(func(s string, v interface{}) bool {
-		n := v.(*contentNode)
+	//	var sectionsToDelete []string
 
-		var shouldBuild bool
+	var branches []*contentBranchNode
+	handleSectionTree := func(b []*contentBranchNode) {
+		branches = b
+	}
+	// TODO1 shouldBuild
 
-		defer func() {
-			// Make sure we always rebuild the view cache.
-			if shouldBuild && err == nil && n.p != nil {
-				m.attachPageToViews(s, n)
-			}
-		}()
+	handleBranch := func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+		tref := &contentTreeRef{
+			m:      m,
+			branch: branch,
+			key:    s,
+		}
 
 		if n.p != nil {
-			// A rebuild
-			shouldBuild = true
+			if n.p.IsHome() {
+				m.s.home = n.p
+			}
 			return false
 		}
 
-		var parent *contentNode
-		var parentBucket *pagesMapBucket
+		var section *contentBranchNode
+		var bucket *pagesMapBucket
+		var kind string
 
-		_, parent = m.getSection(s)
-		if parent == nil {
-			panic(fmt.Sprintf("BUG: parent not set for %q", s))
-		}
-		parentBucket = parent.p.bucket
-
-		n.p, err = m.newPageFromContentNode(n, parentBucket, nil)
-		if err != nil {
-			return true
-		}
-
-		shouldBuild = !(n.p.Kind() == page.KindPage && m.cfg.pageDisabled) && m.s.shouldBuild(n.p)
-		if !shouldBuild {
-			m.deletePage(s)
-			return false
+		if len(branches) == 1 {
+			kind = page.KindHome
+		} else {
+			section = branches[len(branches)-2] // TODO1
+			bucket = section.n.p.bucket
+			kind = page.KindSection
+			// It may also be a taxonomy.
+			// TODO1
 		}
 
-		n.p.treeRef = &contentTreeRef{
-			m:   m,
-			t:   m.pages,
-			n:   n,
-			key: s,
+		if n.fi != nil {
+			n.p, err = section.newPageFromContentNode(m.s, n, bucket, nil)
+			if err != nil {
+				return true
+			}
+		} else {
+			n.p = m.s.newPage(n, bucket, kind, "", m.splitKey(s)...)
 		}
 
-		if err = m.assembleResources(s, n.p, parentBucket); err != nil {
-			return true
+		n.p.treeRef = tref
+
+		if n.p.IsHome() {
+			m.s.home = n.p
 		}
 
 		return false
-	})
+	}
 
-	m.deleteOrphanSections()
+	handlePage := func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+		tref := &contentTreeRef{
+			m:      m,
+			branch: branch,
+			key:    s,
+		}
 
-	return err
+		section := branches[len(branches)-1]
+		bucket := section.n.p.bucket
+		kind := page.KindPage
+		// It may also be a taxonomy term.
+		if section.n.p.Kind() == page.KindTaxonomy {
+			kind = page.KindTerm
+
+		}
+
+		if n.fi != nil {
+			n.p, err = section.newPageFromContentNode(m.s, n, bucket, nil)
+			if err != nil {
+				return true
+			}
+		} else {
+			n.p = m.s.newPage(n, bucket, kind, "", m.splitKey(s)...)
+		}
+
+		n.p.treeRef = tref
+
+		m.attachPageToViews(s, n, branch)
+
+		return false
+	}
+
+	handleResource := func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+		if owner.p == nil {
+			panic("invalid state, page not set on resource owner")
+		}
+
+		p := owner.p
+
+		// TODO1 error handling
+		meta := n.fi.Meta()
+		classifier := meta.Classifier()
+		var r resource.Resource
+		switch classifier {
+		case files.ContentClassContent:
+			var rp *pageState
+			rp, err = branch.newPageFromContentNode(m.s, n, nil, p) // TODO1 parentbucket
+			if err != nil {
+				return true
+			}
+			rp.m.resourcePath = filepath.ToSlash(strings.TrimPrefix(rp.Path(), p.File().Dir()))
+			r = rp
+
+		case files.ContentClassFile:
+			r, err = branch.newResource(n.fi, p)
+			if err != nil {
+				return true
+			}
+		default:
+			panic(fmt.Sprintf("invalid classifier: %q", classifier))
+		}
+
+		p.resources = append(p.resources, r)
+
+		return false
+	}
+
+	// Create home page if it does not exist.
+	hn := m.Get("")
+	if hn == nil {
+		hn = m.InsertSection("", &contentNode{})
+	}
+
+	if hn.n.p == nil {
+		hn.n.p = m.s.newPage(hn.n, nil, page.KindHome, "")
+	}
+
+	m.s.home = hn.n.p
+
+	// First create missing taxonomy nodes.
+	for _, viewName := range m.cfg.taxonomyConfig {
+		key := cleanTreeKey(viewName.plural)
+		if m.Get(key) == nil {
+			n := &contentNode{
+				viewInfo: &contentBundleViewInfo{
+					name: viewName,
+				},
+			}
+			if m.s.home == nil {
+				panic("home not set")
+			}
+			branch := m.InsertSection(key, n)
+			n.p = m.s.newPage(n, m.s.home.bucket, page.KindTaxonomy, "", viewName.plural)
+			n.p.treeRef = &contentTreeRef{
+				m:      m,
+				branch: branch,
+				key:    key,
+			}
+
+		}
+	}
+
+	m.Walk(
+		sectionMapQuery{
+			SectionsFunc: handleSectionTree,
+			Branch: sectionMapQueryCallBacks{
+				Key:      newSectionMapQueryKey(contentMapRoot, true),
+				Page:     handleBranch,
+				Resource: handleResource,
+			},
+			Leaf: sectionMapQueryCallBacks{
+				Page:     handlePage,
+				Resource: handleResource,
+			},
+		})
+
+	// TODO 1	m.deleteOrphanSections()
+
+	return nil
 }
 
-func (m *pageMap) assembleResources(s string, p *pageState, parentBucket *pagesMapBucket) error {
+func (m *contentBranchNode) assembleResources(key string, p *pageState, parentBucket *pagesMapBucket) error {
 	var err error
 
-	m.resources.WalkPrefix(s, func(s string, v interface{}) bool {
+	tree := m.pageResources
+	s := p.s
+
+	tree.nodes.WalkPrefix(key, func(key2 string, v interface{}) bool {
 		n := v.(*contentNode)
 		meta := n.fi.Meta()
 		classifier := meta.Classifier()
@@ -399,7 +632,7 @@ func (m *pageMap) assembleResources(s string, p *pageState, parentBucket *pagesM
 		switch classifier {
 		case files.ContentClassContent:
 			var rp *pageState
-			rp, err = m.newPageFromContentNode(n, parentBucket, p)
+			rp, err = m.newPageFromContentNode(s, n, parentBucket, p)
 			if err != nil {
 				return true
 			}
@@ -422,214 +655,183 @@ func (m *pageMap) assembleResources(s string, p *pageState, parentBucket *pagesM
 	return err
 }
 
-func (m *pageMap) assembleSections() error {
-	var sectionsToDelete []string
-	var err error
+func (m *pageMap) assembleTaxonomies() error {
+	//panic("TODO1")
+	/*
+		var taxonomiesToDelete []string
+		var err error
 
-	m.sections.Walk(func(s string, v interface{}) bool {
-		n := v.(*contentNode)
-		var shouldBuild bool
+		m.taxonomies.Pages.Walk(func(s string, v interface{}) bool {
+			n := v.(*contentNode)
 
-		defer func() {
-			// Make sure we always rebuild the view cache.
-			if shouldBuild && err == nil && n.p != nil {
-				m.attachPageToViews(s, n)
-				if n.p.IsHome() {
-					m.s.home = n.p
-				}
+			if n.p != nil {
+				return false
 			}
-		}()
 
-		sections := m.splitKey(s)
+			kind := n.viewInfo.kind()
+			sections := n.viewInfo.sections()
 
-		if n.p != nil {
-			if n.p.IsHome() {
-				m.s.home = n.p
-			}
-			shouldBuild = true
-			return false
-		}
-
-		var parent *contentNode
-		var parentBucket *pagesMapBucket
-
-		if s != "/" {
-			_, parent = m.getSection(s)
+			_, parent := m.getTaxonomyParent(s)
 			if parent == nil || parent.p == nil {
 				panic(fmt.Sprintf("BUG: parent not set for %q", s))
 			}
-		}
+			parentBucket := parent.p.bucket
 
-		if parent != nil {
-			parentBucket = parent.p.bucket
-		}
+			if n.fi != nil {
+				n.p, err = m.newPageFromContentNode(n, parent.p.bucket, nil)
+				if err != nil {
+					return true
+				}
+			} else {
+				title := ""
+				if kind == page.KindTerm {
+					title = n.viewInfo.term()
+				}
+				n.p = m.s.newPage(n, parent.p.bucket, kind, title, sections...)
+			}
 
-		kind := page.KindSection
-		if s == "/" {
-			kind = page.KindHome
-		}
+			if !m.s.shouldBuild(n.p) {
+				taxonomiesToDelete = append(taxonomiesToDelete, s)
+				return false
+			}
 
-		if n.fi != nil {
-			n.p, err = m.newPageFromContentNode(n, parentBucket, nil)
-			if err != nil {
+			n.p.treeRef = &contentTreeRef{
+				m:   m,
+				t:   m.taxonomies,
+				n:   n,
+				key: s,
+			}
+
+			if err = m.assembleResources(s, n.p, parentBucket); err != nil {
 				return true
 			}
-		} else {
-			n.p = m.s.newPage(n, parentBucket, kind, "", sections...)
-		}
 
-		shouldBuild = m.s.shouldBuild(n.p)
-		if !shouldBuild {
-			sectionsToDelete = append(sectionsToDelete, s)
 			return false
+		})
+
+		for _, s := range taxonomiesToDelete {
+			m.deleteTaxonomy(s)
 		}
 
-		n.p.treeRef = &contentTreeRef{
-			m:   m,
-			t:   m.sections,
-			n:   n,
-			key: s,
-		}
-
-		if err = m.assembleResources(s+cmLeafSeparator, n.p, parentBucket); err != nil {
-			return true
-		}
-
-		return false
-	})
-
-	for _, s := range sectionsToDelete {
-		m.deleteSectionByPath(s)
-	}
-
-	return err
+		return err
+	*/
+	return nil
 }
 
-func (m *pageMap) assembleTaxonomies() error {
-	var taxonomiesToDelete []string
-	var err error
-
-	m.taxonomies.Walk(func(s string, v interface{}) bool {
-		n := v.(*contentNode)
-
-		if n.p != nil {
-			return false
-		}
-
-		kind := n.viewInfo.kind()
-		sections := n.viewInfo.sections()
-
-		_, parent := m.getTaxonomyParent(s)
-		if parent == nil || parent.p == nil {
-			panic(fmt.Sprintf("BUG: parent not set for %q", s))
-		}
-		parentBucket := parent.p.bucket
-
-		if n.fi != nil {
-			n.p, err = m.newPageFromContentNode(n, parent.p.bucket, nil)
-			if err != nil {
-				return true
-			}
-		} else {
-			title := ""
-			if kind == page.KindTerm {
-				title = n.viewInfo.term()
-			}
-			n.p = m.s.newPage(n, parent.p.bucket, kind, title, sections...)
-		}
-
-		if !m.s.shouldBuild(n.p) {
-			taxonomiesToDelete = append(taxonomiesToDelete, s)
-			return false
-		}
-
-		n.p.treeRef = &contentTreeRef{
-			m:   m,
-			t:   m.taxonomies,
-			n:   n,
-			key: s,
-		}
-
-		if err = m.assembleResources(s+cmLeafSeparator, n.p, parentBucket); err != nil {
-			return true
-		}
-
-		return false
-	})
-
-	for _, s := range taxonomiesToDelete {
-		m.deleteTaxonomy(s)
-	}
-
-	return err
-}
-
-func (m *pageMap) attachPageToViews(s string, b *contentNode) {
+// TODO1 error handling
+func (m *pageMap) attachPageToViews(s string, n *contentNode, b *contentBranchNode) error {
 	if m.cfg.taxonomyDisabled {
-		return
+		return nil
 	}
 
 	for _, viewName := range m.cfg.taxonomyConfig {
-		vals := types.ToStringSlicePreserveString(getParam(b.p, viewName.plural, false))
+		vals := types.ToStringSlicePreserveString(getParam(n.p, viewName.plural, false))
 		if vals == nil {
 			continue
 		}
-		w := getParamToLower(b.p, viewName.plural+"_weight")
+		w := getParamToLower(n.p, viewName.plural+"_weight")
 		weight, err := cast.ToIntE(w)
 		if err != nil {
-			m.s.Log.Errorf("Unable to convert taxonomy weight %#v to int for %q", w, b.p.Path())
+			m.s.Log.Errorf("Unable to convert taxonomy weight %#v to int for %q", w, n.p.Path())
 			// weight will equal zero, so let the flow continue
 		}
 
 		for i, v := range vals {
-			termKey := m.s.getTaxonomyKey(v)
+			term := m.s.getTaxonomyKey(v)
 
 			bv := &contentNode{
+				p: n.p,
 				viewInfo: &contentBundleViewInfo{
 					ordinal:    i,
 					name:       viewName,
-					termKey:    termKey,
+					termKey:    term,
 					termOrigin: v,
 					weight:     weight,
-					ref:        b,
+					ref:        n,
 				},
 			}
 
-			var key string
-			if strings.HasSuffix(s, "/") {
-				key = cleanSectionTreeKey(path.Join(viewName.plural, termKey, s))
-			} else {
-				key = cleanTreeKey(path.Join(viewName.plural, termKey, s))
+			key := cleanTreeKey(path.Join(term, s))
+			termKey := cleanTreeKey(term)
+			b.terms.nodes.Insert(key, bv)
+			// It may have been added from a content file.
+			if !b.pages.Has(termKey) {
+				vic := &contentBundleViewInfo{
+					name:       viewName,
+					termKey:    term,
+					termOrigin: v,
+				}
+				n := &contentNode{viewInfo: vic}
+				n.p = m.s.newPage(n, b.n.p.bucket, page.KindTerm, "", viewName.plural, term)
+
+				n.p.treeRef = &contentTreeRef{
+					m:      m,
+					branch: b,
+					key:    termKey,
+				}
+
+				b.pages.nodes.Insert(termKey, n)
 			}
-			m.taxonomyEntries.Insert(key, bv)
 		}
 	}
+
+	return nil
+}
+
+type pageMapQueryKey struct {
+	Key string
+
+	isSet    bool
+	isPrefix bool
+}
+
+func (q pageMapQueryKey) IsPrefix() bool {
+	return !q.IsZero() && q.isPrefix
+}
+
+func (q pageMapQueryKey) Eq(key string) bool {
+	if q.IsZero() || q.isPrefix {
+		return false
+	}
+	return q.Key == key
+}
+
+func (q pageMapQueryKey) IsZero() bool {
+	return !q.isSet
+}
+
+func (q pageMapQuery) IsFiltered(s string, n *contentNode) bool {
+	return q.Filter != nil && q.Filter(s, n)
 }
 
 type pageMapQuery struct {
-	Prefix string
-	Filter contentTreeNodeCallback
+	Leaf   pageMapQueryKey
+	Branch pageMapQueryKey
+	Filter contentTreeNodeFilter
 }
 
 func (m *pageMap) collectPages(query pageMapQuery, fn func(c *contentNode)) error {
-	if query.Filter == nil {
-		query.Filter = contentTreeNoListAlwaysFilter
-	}
+	panic("TODO1 collectPages")
+	/*
+		if query.Filter == nil {
+			query.Filter = contentTreeNoListAlwaysFilter
+		}
 
-	m.pages.WalkQuery(query, func(s string, n *contentNode) bool {
-		fn(n)
-		return false
-	})
+		m.pages.WalkQuery(query, func(s string, n *contentNode) bool {
+			fn(n)
+			return false
+		})
+	*/
 
 	return nil
 }
 
 func (m *pageMap) collectPagesAndSections(query pageMapQuery, fn func(c *contentNode)) error {
+	panic("TODO1 collectPagesAndSections")
 	if err := m.collectSections(query, fn); err != nil {
 		return err
 	}
 
-	query.Prefix = query.Prefix + cmBranchSeparator
 	if err := m.collectPages(query, fn); err != nil {
 		return err
 	}
@@ -638,55 +840,67 @@ func (m *pageMap) collectPagesAndSections(query pageMapQuery, fn func(c *content
 }
 
 func (m *pageMap) collectSections(query pageMapQuery, fn func(c *contentNode)) error {
-	level := strings.Count(query.Prefix, "/")
-
-	return m.collectSectionsFn(query, func(s string, c *contentNode) bool {
-		if strings.Count(s, "/") != level+1 {
+	panic("TODO1 collectSections")
+	/*
+		m.sections.WalkQuery(query, func(s string, n *contentNode) bool {
+			fn(n)
 			return false
-		}
-
-		fn(c)
-
-		return false
-	})
-}
-
-func (m *pageMap) collectSectionsFn(query pageMapQuery, fn func(s string, c *contentNode) bool) error {
-	if !strings.HasSuffix(query.Prefix, "/") {
-		query.Prefix += "/"
-	}
-
-	m.sections.WalkQuery(query, func(s string, n *contentNode) bool {
-		return fn(s, n)
-	})
-
+		})
+	*/
 	return nil
 }
 
 func (m *pageMap) collectSectionsRecursiveIncludingSelf(query pageMapQuery, fn func(c *contentNode)) error {
-	return m.collectSectionsFn(query, func(s string, c *contentNode) bool {
-		fn(c)
-		return false
-	})
+	// TODO1
+	return nil
+
 }
 
 func (m *pageMap) collectTaxonomies(prefix string, fn func(c *contentNode)) error {
-	m.taxonomies.WalkQuery(pageMapQuery{Prefix: prefix}, func(s string, n *contentNode) bool {
-		fn(n)
-		return false
-	})
+	panic("TODO1 collectTaxo")
+	/*
+		m.taxonomies.WalkQuery(pageMapQuery{Prefix: prefix}, func(s string, n *contentNode) bool {
+			fn(n)
+			return false
+		})
+	*/
 	return nil
 }
 
 // withEveryBundlePage applies fn to every Page, including those bundled inside
 // leaf bundles.
-func (m *pageMap) withEveryBundlePage(fn func(p *pageState) bool) {
-	m.bundleTrees.Walk(func(s string, n *contentNode) bool {
+func (m *pageMap) withEveryBundlePage(fn func(p *pageState) bool) error {
+	return m.withEveryBundleNode(func(n *contentNode) bool {
 		if n.p != nil {
 			return fn(n.p)
 		}
 		return false
 	})
+}
+
+func (m *pageMap) withEveryBundleNode(fn func(n *contentNode) bool) error {
+	callbackPage := func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+		return fn(n)
+	}
+
+	callbackResource := func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+		return fn(n)
+	}
+
+	q := sectionMapQuery{
+		Filter: func(s string, n *contentNode) bool { return n.p == nil },
+		Branch: sectionMapQueryCallBacks{
+			Key:      newSectionMapQueryKey("", true),
+			Page:     callbackPage,
+			Resource: callbackResource,
+		},
+		Leaf: sectionMapQueryCallBacks{
+			Page:     callbackPage,
+			Resource: callbackResource,
+		},
+	}
+
+	return m.Walk(q)
 }
 
 type pageMaps struct {
@@ -697,45 +911,51 @@ type pageMaps struct {
 // deleteSection deletes the entire section from s.
 func (m *pageMaps) deleteSection(s string) {
 	m.withMaps(func(pm *pageMap) error {
-		pm.deleteSectionByPath(s)
+		pm.sectionMap.sections.Delete(s)
 		return nil
 	})
 }
 
 func (m *pageMaps) AssemblePages() error {
+
 	return m.withMaps(func(pm *pageMap) error {
-		if err := pm.CreateMissingNodes(); err != nil {
+		/*if err := pm.CreateMissingNodes(); err != nil {
 			return err
-		}
+		}*/
 
 		if err := pm.assemblePages(); err != nil {
 			return err
 		}
 
-		if err := pm.createMissingTaxonomyNodes(); err != nil {
-			return err
-		}
-
+		/*
+			if err := pm.createMissingTaxonomyNodes(); err != nil {
+				return err
+			}
+		*/
 		// Handle any new sections created in the step above.
-		if err := pm.assembleSections(); err != nil {
+		// TODO1 remove?
+		/*if err := pm.assembleSections(); err != nil {
 			return err
-		}
+		}*/
 
 		if pm.s.home == nil {
+			panic("TODO1 home is nil")
 			// Home is disabled, everything is.
-			pm.bundleTrees.DeletePrefix("")
+			pm.sections.DeletePrefix("")
 			return nil
 		}
 
-		if err := pm.assembleTaxonomies(); err != nil {
+		/*if err := pm.assembleTaxonomies(); err != nil {
 			return err
 		}
 
 		if err := pm.createSiteTaxonomies(); err != nil {
 			return err
-		}
+		}*/
 
-		sw := &sectionWalker{m: pm.contentMap}
+		/* TODO1
+
+		sw := &sectionWalker{m: pm.sectionMaps}
 		a := sw.applyAggregates()
 		_, mainSectionsSet := pm.s.s.Info.Params()["mainsections"]
 		if !mainSectionsSet && a.mainSection != "" {
@@ -748,27 +968,27 @@ func (m *pageMaps) AssemblePages() error {
 		if resource.IsZeroDates(pm.s.home) {
 			pm.s.home.m.Dates = a.datesAll
 		}
+		*/
 
 		return nil
 	})
+
 }
 
-func (m *pageMaps) walkBundles(fn func(n *contentNode) bool) {
-	_ = m.withMaps(func(pm *pageMap) error {
-		pm.bundleTrees.Walk(func(s string, n *contentNode) bool {
-			return fn(n)
-		})
-		return nil
+func (m *pageMaps) walkBundles(fn func(n *contentNode) bool) error {
+	return m.withMaps(func(pm *pageMap) error {
+		return pm.withEveryBundleNode(fn)
 	})
 }
 
 func (m *pageMaps) walkBranchesPrefix(prefix string, fn func(s string, n *contentNode) bool) {
-	_ = m.withMaps(func(pm *pageMap) error {
+	panic("TODO1 walkBranchesPrefix")
+	/*_ = m.withMaps(func(pm *sectionMaps) error {
 		pm.branchTrees.WalkPrefix(prefix, func(s string, n *contentNode) bool {
 			return fn(s, n)
 		})
 		return nil
-	})
+	})*/
 }
 
 func (m *pageMaps) withMaps(fn func(pm *pageMap) error) error {
@@ -802,16 +1022,8 @@ type pagesMapBucketPages struct {
 	sections     page.Pages
 }
 
-func (b *pagesMapBucket) getPages() page.Pages {
-	b.pagesInit.Do(func() {
-		b.pages = b.owner.treeRef.getPages()
-		page.SortByDefault(b.pages)
-	})
-	return b.pages
-}
-
-func (b *pagesMapBucket) getPagesRecursive() page.Pages {
-	pages := b.owner.treeRef.getPagesRecursive()
+func (b *pagesMapBucket) getRegularPagesRecursive() page.Pages {
+	pages := b.owner.treeRef.getRegularPagesRecursive()
 	page.SortByDefault(pages)
 	return pages
 }
@@ -835,27 +1047,28 @@ func (b *pagesMapBucket) getSections() page.Pages {
 }
 
 func (b *pagesMapBucket) getTaxonomies() page.Pages {
-	b.sectionsInit.Do(func() {
-		var pas page.Pages
-		ref := b.owner.treeRef
-		ref.m.collectTaxonomies(ref.key, func(c *contentNode) {
-			pas = append(pas, c.p)
-		})
-		page.SortByDefault(pas)
-		b.sections = pas
+	// TODO1 b.sections/init
+	ref := b.owner.treeRef
+	if ref == nil {
+		return nil
+	}
+	var pas page.Pages
+	ref.branch.pages.WalkPrefix(ref.key+"/", func(s string, n *contentNode) bool {
+		pas = append(pas, n.p)
+		return false
 	})
-
-	return b.sections
+	page.SortByDefault(pas)
+	return pas
 }
 
 func (b *pagesMapBucket) getTaxonomyEntries() page.Pages {
-	var pas page.Pages
 	ref := b.owner.treeRef
-	viewInfo := ref.n.viewInfo
-	prefix := strings.ToLower("/" + viewInfo.name.plural + "/" + viewInfo.termKey + "/")
-	ref.m.taxonomyEntries.WalkPrefix(prefix, func(s string, v interface{}) bool {
-		n := v.(*contentNode)
-		pas = append(pas, n.viewInfo.ref.p)
+	if ref == nil {
+		return nil
+	}
+	var pas page.Pages
+	ref.branch.terms.WalkPrefix(ref.key+"/", func(s string, n *contentNode) bool {
+		pas = append(pas, n.p)
 		return false
 	})
 	page.SortByDefault(pas)
@@ -945,7 +1158,6 @@ type sectionWalkHandler interface {
 
 type sectionWalker struct {
 	err error
-	m   *contentMap
 }
 
 func (w *sectionWalker) applyAggregates() *sectionAggregateHandler {
@@ -955,73 +1167,74 @@ func (w *sectionWalker) applyAggregates() *sectionAggregateHandler {
 }
 
 func (w *sectionWalker) walkLevel(prefix string, createVisitor func() sectionWalkHandler) sectionWalkHandler {
-	level := strings.Count(prefix, "/")
+	// TODO1
+	/*
+		level := strings.Count(prefix, "/")
+		prefix = helpers.AddTrailingSlash(prefix)
 
-	visitor := createVisitor()
+		visitor := createVisitor()
 
-	w.m.taxonomies.WalkBelow(prefix, func(s string, v interface{}) bool {
-		currentLevel := strings.Count(s, "/")
+		for _, stree := range w.m.pageTrees {
+			w.m.taxonomies.Sections.WalkPrefix(prefix, func(s string, v interface{}) bool {
+				currentLevel := strings.Count(s, "/")
 
-		if currentLevel > level+1 {
-			return false
-		}
+				if currentLevel > level+1 {
+					return false
+				}
 
-		n := v.(*contentNode)
-
-		if w.err = visitor.handleSectionPre(s, n); w.err != nil {
-			return true
-		}
-
-		if currentLevel == 2 {
-			nested := w.walkLevel(s, createVisitor)
-			if w.err = visitor.handleNested(nested); w.err != nil {
-				return true
-			}
-		} else {
-			w.m.taxonomyEntries.WalkPrefix(s, func(ss string, v interface{}) bool {
 				n := v.(*contentNode)
-				w.err = visitor.handlePage(ss, n)
+				tree := v.(*sectionTreePages)
+
+				if w.err = visitor.handleSectionPre(s, n); w.err != nil {
+					return true
+				}
+
+				tree.pages.Walk(func(ss string, v interface{}) bool {
+					n := v.(*contentNode)
+					w.err = visitor.handlePage(ss, n)
+					return w.err != nil
+				})
+
+				w.err = visitor.handleSectionPost()
+
 				return w.err != nil
 			})
 		}
 
-		w.err = visitor.handleSectionPost()
+		w.m.sections.Pages.WalkPrefix(prefix, func(s string, v interface{}) bool {
+			currentLevel := strings.Count(s, "/")
+			if currentLevel > level+1 {
+				return false
+			}
 
-		return w.err != nil
-	})
+			n := v.(*contentNode)
 
-	w.m.sections.WalkBelow(prefix, func(s string, v interface{}) bool {
-		currentLevel := strings.Count(s, "/")
-		if currentLevel > level+1 {
-			return false
-		}
+			if w.err = visitor.handleSectionPre(s, n); w.err != nil {
+				return true
+			}
 
-		n := v.(*contentNode)
+			w.m.pages.Pages.WalkPrefix(s+contentMapNodeSeparator, func(s string, v interface{}) bool {
+				w.err = visitor.handlePage(s, v.(*contentNode))
+				return w.err != nil
+			})
 
-		if w.err = visitor.handleSectionPre(s, n); w.err != nil {
-			return true
-		}
+			if w.err != nil {
+				return true
+			}
 
-		w.m.pages.WalkPrefix(s+cmBranchSeparator, func(s string, v interface{}) bool {
-			w.err = visitor.handlePage(s, v.(*contentNode))
+			nested := w.walkLevel(s, createVisitor)
+			if w.err = visitor.handleNested(nested); w.err != nil {
+				return true
+			}
+
+			w.err = visitor.handleSectionPost()
+
 			return w.err != nil
 		})
 
-		if w.err != nil {
-			return true
-		}
-
-		nested := w.walkLevel(s, createVisitor)
-		if w.err = visitor.handleNested(nested); w.err != nil {
-			return true
-		}
-
-		w.err = visitor.handleSectionPost()
-
-		return w.err != nil
-	})
-
-	return visitor
+		return visitor
+	*/
+	return nil
 }
 
 type viewName struct {

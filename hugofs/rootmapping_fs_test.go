@@ -286,6 +286,9 @@ func TestRootMappingFsMount(t *testing.T) {
 		c.Assert(fi.Meta().Lang(), qt.Equals, lang)
 		c.Assert(fi.Name(), qt.Equals, "p1.md")
 	}
+
+	s, _ := rfs.ReverseLookup("singlefiles/sv.txt")
+	c.Assert(s, qt.Equals, filepath.FromSlash("singles/p1.md"))
 }
 
 func TestRootMappingFsMountOverlap(t *testing.T) {
