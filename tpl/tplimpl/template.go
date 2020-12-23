@@ -43,6 +43,7 @@ import (
 
 	htmltemplate "github.com/gohugoio/hugo/tpl/internal/go_templates/htmltemplate"
 	texttemplate "github.com/gohugoio/hugo/tpl/internal/go_templates/texttemplate"
+	"github.com/gohugoio/hugo/tpl/internal/go_templates/texttemplate/parse"
 
 	"github.com/gohugoio/hugo/identity"
 	"github.com/gohugoio/hugo/tpl"
@@ -63,6 +64,8 @@ var identifiersRe = regexp.MustCompile(`at \<(.*?)(\.{3})?\>:`)
 var embeddedTemplatesAliases = map[string][]string{
 	"shortcodes/twitter.html": {"shortcodes/tweet.html"},
 }
+
+var deferIncr = &identity.IncrementByOne{}
 
 var (
 	_ tpl.TemplateManager    = (*templateExec)(nil)
@@ -645,6 +648,18 @@ func (t *templateHandler) applyTemplateTransformers(ns *templateNamespace, ts *t
 		t.identityNotFound[k] = append(t.identityNotFound[k], c.t)
 	}
 
+	for k, v := range c.deferredNodes {
+		tree := &parse.Tree{
+			Name: k,
+			Root: v,
+		}
+		ns.addParseTree(templateInfo{
+			name:   k,
+			isText: ts.isText(),
+		}, tree)
+
+	}
+
 	return c, err
 }
 
@@ -876,6 +891,39 @@ func (t *templateNamespace) parse(info templateInfo) (*templateState, error) {
 		prototype := t.prototypeText
 
 		templ, err := prototype.New(info.name).Parse(info.template)
+		if err != nil {
+			return nil, err
+		}
+
+		ts := newTemplateState(templ, info)
+
+		t.templates[info.name] = ts
+
+		return ts, nil
+	}
+
+	prototype := t.prototypeHTML
+
+	templ, err := prototype.New(info.name).Parse(info.template)
+	if err != nil {
+		return nil, err
+	}
+
+	ts := newTemplateState(templ, info)
+
+	t.templates[info.name] = ts
+
+	return ts, nil
+}
+
+func (t *templateNamespace) addParseTree(info templateInfo, tree *parse.Tree) (*templateState, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if info.isText {
+		prototype := t.prototypeText
+
+		templ, err := prototype.AddParseTree(info.name, tree)
 		if err != nil {
 			return nil, err
 		}

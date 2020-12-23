@@ -14,6 +14,7 @@
 package tplimpl
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -40,6 +41,7 @@ type templateContext struct {
 	visited          map[string]bool
 	templateNotFound map[string]bool
 	identityNotFound map[string]bool
+	deferredNodes    map[string]*parse.ListNode
 	lookupFn         func(name string) *templateState
 
 	// The last error encountered.
@@ -79,6 +81,7 @@ func newTemplateContext(
 		visited:          make(map[string]bool),
 		templateNotFound: make(map[string]bool),
 		identityNotFound: make(map[string]bool),
+		deferredNodes:    make(map[string]*parse.ListNode),
 	}
 }
 
@@ -113,9 +116,13 @@ func getParseTree(templ tpl.Template) *parse.Tree {
 
 const (
 	partialReturnWrapperTempl = `{{ $_hugo_dot := $ }}{{ $ := .Arg }}{{ with .Arg }}{{ $_hugo_dot.Set ("PLACEHOLDER") }}{{ end }}`
+	deferWrapperTempl         = `{{ deferSave "NAME" . }}`
 )
 
-var partialReturnWrapper *parse.ListNode
+var (
+	partialReturnWrapper *parse.ListNode
+	deferWrapper         *parse.ListNode
+)
 
 func init() {
 	templ, err := texttemplate.New("").Parse(partialReturnWrapperTempl)
@@ -123,6 +130,17 @@ func init() {
 		panic(err)
 	}
 	partialReturnWrapper = templ.Tree.Root
+
+	funcs := texttemplate.FuncMap{
+		"deferSave": func(name string, v interface{}) interface{} { return "PLACEHOLDER" },
+	}
+
+	templ, err = texttemplate.New("").Funcs(funcs).Parse(deferWrapperTempl)
+	if err != nil {
+		panic(err)
+	}
+	deferWrapper = templ.Tree.Root
+
 }
 
 func (c *templateContext) wrapInPartialReturnWrapper(n *parse.ListNode) *parse.ListNode {
@@ -135,6 +153,20 @@ func (c *templateContext) wrapInPartialReturnWrapper(n *parse.ListNode) *parse.L
 	// Note that this is a PipeNode, so it will be wrapped in parens.
 	setPipe.Cmds = []*parse.CommandNode{c.returnNode}
 	withNode.List.Nodes = append(n.Nodes, retn)
+
+	return wrapper
+}
+
+func (c *templateContext) saveDefer(n *parse.ListNode) *parse.ListNode {
+	name := fmt.Sprintf("__hugo_defer_%d", deferIncr.Incr())
+	wrapper := deferWrapper.CopyList()
+	action := wrapper.Nodes[0].(*parse.ActionNode)
+	nameNode := action.Pipe.Cmds[0].Args[1].(*parse.StringNode)
+	nameNode.Text = name
+	nameNode.Quoted = fmt.Sprintf("%q", name)
+
+	// Save for deferred execution.
+	c.deferredNodes[name] = n
 
 	return wrapper
 }
@@ -153,6 +185,17 @@ func (c *templateContext) applyTransformations(n parse.Node) (bool, error) {
 	case *parse.IfNode:
 		c.applyTransformationsToNodes(x.Pipe, x.List, x.ElseList)
 	case *parse.WithNode:
+		if x.Pipe.Cmds != nil && x.Pipe.Cmds[0].Args != nil {
+			args := x.Pipe.Cmds[0].Args
+			firstArg := args[0]
+			if firstArg.Type() == parse.NodeIdentifier && firstArg.String() == "defer" {
+				if len(args) > 1 {
+					fmt.Println("F", args[1])
+				}
+				x.List = c.saveDefer(x.List)
+				// TODO1: Fail on ElseList
+			}
+		}
 		c.applyTransformationsToNodes(x.Pipe, x.List, x.ElseList)
 	case *parse.RangeNode:
 		c.applyTransformationsToNodes(x.Pipe, x.List, x.ElseList)

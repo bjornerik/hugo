@@ -15,6 +15,8 @@
 package templates
 
 import (
+	"fmt"
+
 	"github.com/gohugoio/hugo/deps"
 )
 
@@ -36,4 +38,20 @@ type Namespace struct {
 func (ns *Namespace) Exists(name string) bool {
 	_, found := ns.deps.Tmpl().Lookup(name)
 	return found
+}
+
+// Defer is a marker function that can be used to defer template blocks
+// for later execution (after the main build).
+func (ns *Namespace) Defer(ctx interface{}) interface{} {
+	return ctx
+}
+
+// DeferSave is an internal Hugo template function and not meant to be used
+// directly in the templates.
+func (ns *Namespace) DeferSave(id string, ctx interface{}) string {
+	fmt.Println("--- Defer save", id)
+	// TODO1 ctx id
+	// TODO1 ctx snapshot
+	// TODO1 concurrent partitions
+	return id
 }

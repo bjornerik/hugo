@@ -13,6 +13,7 @@
 package tplimpl
 
 import (
+	"fmt"
 	"testing"
 
 	template "github.com/gohugoio/hugo/tpl/internal/go_templates/htmltemplate"
@@ -20,6 +21,32 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/gohugoio/hugo/tpl"
 )
+
+func TestTransformDefer(t *testing.T) {
+	c := qt.New(t)
+
+	funcs := template.FuncMap{
+		"defer":     func(v interface{}) interface{} { return v },
+		"deferSave": func(name string, v interface{}) interface{} { return "PLACEHOLDER" },
+	}
+
+	templ, err := template.New("foo").Funcs(funcs).Parse(`
+{{ with defer "myparam" }}
+Hello
+{{ end }}
+`)
+	c.Assert(err, qt.IsNil)
+	ts := newTestTemplate(templ)
+
+	ctx := newTemplateContext(
+		ts,
+		newTestTemplateLookup(ts),
+	)
+	ctx.applyTransformations(templ.Tree.Root)
+
+	fmt.Println(templ.Tree.Root)
+
+}
 
 // Issue #2927
 func TestTransformRecursiveTemplate(t *testing.T) {

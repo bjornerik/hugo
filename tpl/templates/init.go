@@ -37,6 +37,9 @@ func init() {
 			},
 		)
 
+		ns.AddMethodMapping(ctx.Defer, []string{"defer"}, nil)
+		ns.AddMethodMapping(ctx.DeferSave, []string{"deferSave"}, nil)
+
 		return ns
 	}
 
