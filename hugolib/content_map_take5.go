@@ -101,7 +101,7 @@ type contentBranchNode struct {
 	resources     *contentBranchNodeTree
 	pages         *contentBranchNodeTree
 	pageResources *contentBranchNodeTree
-	terms         *contentBranchNodeTree
+	terms         *contentBranchNodeTree // rename
 }
 
 func (b *contentBranchNode) InsertPage(key string, n *contentNode) {
@@ -148,7 +148,7 @@ func (m *sectionMap) InsertSection(key string, n *contentNode) *contentBranchNod
 		// Update existing.
 		branch := v.(*contentBranchNode)
 		branch.n = n
-		return nil
+		return branch
 	}
 	branch := newContentBranchNode(key, n)
 	m.sections.Insert(key, branch)
@@ -161,6 +161,11 @@ func (m *sectionMap) LongestPrefix(key string) (string, *contentBranchNode) {
 		return "", nil
 	}
 	return k, v.(*contentBranchNode)
+}
+
+func (m *sectionMap) Has(key string) bool {
+	_, found := m.sections.Get(key)
+	return found
 }
 
 func (m *sectionMap) GetPageNode(key string) *contentNode {
@@ -182,7 +187,7 @@ func (m *sectionMap) GetPageNode(key string) *contentNode {
 
 func (m *sectionMap) WalkPagesPrefixSection(prefix string, filter contentTreeNodeCallback, callback contentTreeOwnerNodeCallback) error {
 	q := sectionMapQuery{
-		Filter: filter,
+		Exclude: filter,
 		Branch: sectionMapQueryCallBacks{
 			Key:  newSectionMapQueryKey(prefix, true),
 			Page: callback,
@@ -197,7 +202,7 @@ func (m *sectionMap) WalkPagesPrefixSection(prefix string, filter contentTreeNod
 func (m *sectionMap) WalkPagesPrefixSectionNoRecurse(prefix string, filter contentTreeNodeCallback, callback contentTreeOwnerNodeCallback) error {
 	q := sectionMapQuery{
 		NoRecurse: true,
-		Filter:    filter,
+		Exclude:   filter,
 		Branch: sectionMapQueryCallBacks{
 			Key:  newSectionMapQueryKey(prefix, true),
 			Page: callback,
@@ -218,14 +223,14 @@ func (m *sectionMap) Walk(q sectionMapQuery) error {
 		return errors.New("prefix search is currently only implemented starting for branch keys")
 	}
 
-	if q.Filter != nil {
+	if q.Exclude != nil {
 		// Apply global node filter.
 		applyFilter := func(c contentTreeOwnerNodeCallback) contentTreeOwnerNodeCallback {
 			if c == nil {
 				return nil
 			}
 			return func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
-				if q.Filter(s, n) {
+				if q.Exclude(s, n) {
 					// Skip this node, but continue walk.
 					return false
 				}
@@ -255,7 +260,15 @@ func (m *sectionMap) Walk(q sectionMapQuery) error {
 
 	handleBranchPage := func(depth depthType, s string, v interface{}) bool {
 		bn := v.(*contentBranchNode)
+
+		// TODO1 check when used and only load it then.
+		var parentBranch *contentBranchNode
+		if s != "" {
+			_, parentBranch = m.LongestPrefix(s[:len(s)-1])
+		}
+
 		if q.SectionsFunc != nil {
+			// TODO1 remove
 			if currentSectionBranchKey == sectionZeroKey {
 				currentSectionBranchKey = s
 				currentSectionBranch = []*contentBranchNode{bn}
@@ -277,18 +290,20 @@ func (m *sectionMap) Walk(q sectionMapQuery) error {
 		}
 
 		if depth <= depthBranch {
-			if q.Branch.Page != nil && q.Branch.Page(bn, bn.n, s, bn.n) {
+			if q.Branch.Page != nil && q.Branch.Page(parentBranch, bn.n, s, bn.n) {
 				return false
 			}
 
 			if q.Branch.Resource != nil {
 				bn.resources.nodes.Walk(func(s string, v interface{}) bool {
+					// Note: We're passing the owning branch as the branch
+					// to this branch's resources.
 					return q.Branch.Resource(bn, bn.n, s, v.(*contentNode))
 				})
 			}
 		}
 
-		if depth == depthBranch {
+		if q.OnlyBranches || depth == depthBranch {
 			return false
 		}
 
@@ -366,7 +381,7 @@ func (m *sectionMap) Walk(q sectionMapQuery) error {
 		return nil
 	}
 
-	if q.Leaf.Key.IsZero() || !q.Leaf.HasCallback() {
+	if q.OnlyBranches || q.Leaf.Key.IsZero() || !q.Leaf.HasCallback() {
 		// Done.
 		return nil
 	}
@@ -446,10 +461,12 @@ func (m *sectionMap) splitKey(k string) []string {
 type sectionMapQuery struct {
 	// Restrict query to one level.
 	NoRecurse bool
+	// Do not navigate down to the leaf nodes.
+	OnlyBranches bool
 	// Will be called for every section change.
 	SectionsFunc func(sections []*contentBranchNode)
 	// Global node filter. Return true to skip.
-	Filter contentTreeNodeCallback
+	Exclude contentTreeNodeCallback
 	// Handle branch (sections and taxonomies) nodes.
 	Branch sectionMapQueryCallBacks
 	// Handle leaf nodes (pages)

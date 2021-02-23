@@ -304,20 +304,23 @@ func (p *pageMeta) Weight() int {
 	return p.weight
 }
 
-func (pm *pageMeta) mergeBucketCascades(b1, b2 *pagesMapBucket) {
+func (pm *pageMeta) mergeBucketCascades(skipKey func(key string) bool, b1, b2 *pagesMapBucket) {
 	if b1.cascade == nil {
 		b1.cascade = make(map[page.PageMatcher]maps.Params)
 	}
 
 	if b2 != nil && b2.cascade != nil {
 		for k, v := range b2.cascade {
-
 			vv, found := b1.cascade[k]
 			if !found {
 				b1.cascade[k] = v
 			} else {
 				// Merge
 				for ck, cv := range v {
+					if skipKey(ck) {
+						continue
+					}
+
 					if _, found := vv[ck]; !found {
 						vv[ck] = cv
 					}
@@ -380,7 +383,13 @@ func (pm *pageMeta) setMetadata(parentBucket *pagesMapBucket, p *pageState, fron
 	if p.bucket != nil {
 		if parentBucket != nil {
 			// Merge missing keys from parent into this.
-			pm.mergeBucketCascades(p.bucket, parentBucket)
+			pm.mergeBucketCascades(func(key string) bool {
+				// TODO1
+				if key != "title" {
+					return false
+				}
+				return p.File().IsZero()
+			}, p.bucket, parentBucket)
 		}
 		cascade = p.bucket.cascade
 	} else if parentBucket != nil {
@@ -708,6 +717,7 @@ func (p *pageMeta) applyDefaultValues(n *contentNode) error {
 		case page.KindHome:
 			p.title = p.s.Info.title
 		case page.KindSection:
+
 			var sectionName string
 			if n != nil {
 				sectionName = n.rootSection()

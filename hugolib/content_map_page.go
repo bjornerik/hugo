@@ -97,7 +97,7 @@ func (m *pageMap) createMissingTaxonomyNodes() error {
 	return nil
 }
 
-func (m *contentBranchNode) newPageFromContentNode(
+func (m *pageMap) newPageFromContentNode(
 	s *Site,
 	n *contentNode, parentBucket *pagesMapBucket, owner *pageState) (*pageState, error) {
 	if n.fi == nil {
@@ -276,6 +276,26 @@ func (m *contentBranchNode) newResource(fim hugofs.FileMetaInfo, owner *pageStat
 }
 
 func (m *pageMap) createSiteTaxonomies() error {
+	m.s.taxonomies = make(TaxonomyList)
+	for _, viewName := range m.cfg.taxonomyConfig {
+		taxonomy := make(Taxonomy)
+		m.s.taxonomies[viewName.plural] = taxonomy
+		m.WalkBranchesPrefix(cleanTreeKey(viewName.plural)+"/", func(s string, b *contentBranchNode) bool {
+			b.terms.Walk(func(s string, n *contentNode) bool {
+				info := n.viewInfo
+				taxonomy.add(info.termKey, page.NewWeightedPage(info.weight, info.ref.p, n.p))
+				return false
+			})
+			return false
+		})
+	}
+
+	for _, taxonomy := range m.s.taxonomies {
+		for _, v := range taxonomy {
+			v.Sort()
+		}
+	}
+
 	//panic("TODO1")
 	/*
 		m.s.taxonomies = make(TaxonomyList)
@@ -430,28 +450,35 @@ func (m *pageMap) assembleSections() error {
 }
 
 func (m *pageMap) assemblePages() error {
+	// TODO1 distinguish between 1st and 2nd... builds (re check p nil etc.)
 	// TODO1	m.taxonomyEntries.DeletePrefix("/")
-
-	/*if err := m.assembleSections(); err != nil {
-		return err
-		// TODO1
-	}*/
 
 	var err error
 
-	if err != nil {
-		return err
-	}
-
-	//	var sectionsToDelete []string
-
-	var branches []*contentBranchNode
-	handleSectionTree := func(b []*contentBranchNode) {
-		branches = b
-	}
-	// TODO1 shouldBuild
+	// Holds references to sections or pages to exlude from the build
+	// because front matter dictated it (e.g. a draft).
+	var sectionsToDelete []string
+	var pagesToDelete []*contentTreeRef
+	defer func() {
+		for _, p := range pagesToDelete {
+			p.branch.pages.nodes.Delete(p.key)
+			p.branch.resources.nodes.Delete(p.key + "/")
+		}
+		for _, s := range sectionsToDelete {
+			m.sections.Delete(s)
+			m.sections.DeletePrefix(s + "/")
+		}
+	}()
 
 	handleBranch := func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+		if branch == nil && s != "" {
+			panic(fmt.Sprintf("no branch set for branch %q", s))
+		}
+
+		if s != "" && branch.n.p == nil {
+			panic(fmt.Sprintf("no page set on owner for for branch %q", s))
+		}
+
 		tref := &contentTreeRef{
 			m:      m,
 			branch: branch,
@@ -466,21 +493,20 @@ func (m *pageMap) assemblePages() error {
 		}
 
 		var section *contentBranchNode
+		section = branch // TODO1
 		var bucket *pagesMapBucket
-		var kind string
-
-		if len(branches) == 1 {
+		kind := page.KindSection
+		if s == "" {
 			kind = page.KindHome
-		} else {
-			section = branches[len(branches)-2] // TODO1
-			bucket = section.n.p.bucket
-			kind = page.KindSection
-			// It may also be a taxonomy.
-			// TODO1
 		}
 
+		bucket = section.n.p.bucket
+		// It may also be a taxonomy.
+		// TODO1
+
 		if n.fi != nil {
-			n.p, err = section.newPageFromContentNode(m.s, n, bucket, nil)
+
+			n.p, err = m.newPageFromContentNode(m.s, n, bucket, nil)
 			if err != nil {
 				return true
 			}
@@ -494,17 +520,28 @@ func (m *pageMap) assemblePages() error {
 			m.s.home = n.p
 		}
 
+		if !m.s.shouldBuild(n.p) {
+			if s == "" {
+				// Home page
+				// TODO1 a way to abort walking.
+				return true
+
+			}
+			sectionsToDelete = append(sectionsToDelete, s)
+		}
+
 		return false
 	}
 
 	handlePage := func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+
 		tref := &contentTreeRef{
 			m:      m,
 			branch: branch,
 			key:    s,
 		}
 
-		section := branches[len(branches)-1]
+		section := branch
 		bucket := section.n.p.bucket
 		kind := page.KindPage
 		// It may also be a taxonomy term.
@@ -514,7 +551,7 @@ func (m *pageMap) assemblePages() error {
 		}
 
 		if n.fi != nil {
-			n.p, err = section.newPageFromContentNode(m.s, n, bucket, nil)
+			n.p, err = m.newPageFromContentNode(m.s, n, bucket, nil)
 			if err != nil {
 				return true
 			}
@@ -524,7 +561,11 @@ func (m *pageMap) assemblePages() error {
 
 		n.p.treeRef = tref
 
-		m.attachPageToViews(s, n, branch)
+		if !m.s.shouldBuild(n.p) {
+			pagesToDelete = append(pagesToDelete, tref)
+		}
+
+		//m.attachPageToViews(s, n, branch)
 
 		return false
 	}
@@ -543,7 +584,7 @@ func (m *pageMap) assemblePages() error {
 		switch classifier {
 		case files.ContentClassContent:
 			var rp *pageState
-			rp, err = branch.newPageFromContentNode(m.s, n, nil, p) // TODO1 parentbucket
+			rp, err = m.newPageFromContentNode(m.s, n, branch.n.p.bucket, p)
 			if err != nil {
 				return true
 			}
@@ -571,7 +612,22 @@ func (m *pageMap) assemblePages() error {
 	}
 
 	if hn.n.p == nil {
-		hn.n.p = m.s.newPage(hn.n, nil, page.KindHome, "")
+
+		if hn.n.fi != nil {
+			hn.n.p, err = m.newPageFromContentNode(m.s, hn.n, nil, nil)
+			if err != nil {
+				return err
+			}
+		} else {
+			hn.n.p = m.s.newPage(hn.n, nil, page.KindHome, "", "")
+		}
+
+		// TODO1 rework this treeRef thing
+		hn.n.p.treeRef = &contentTreeRef{
+			m:      m,
+			branch: hn,
+		}
+
 	}
 
 	m.s.home = hn.n.p
@@ -599,9 +655,11 @@ func (m *pageMap) assemblePages() error {
 		}
 	}
 
+	// First pass.
 	m.Walk(
 		sectionMapQuery{
-			SectionsFunc: handleSectionTree,
+			Exclude:      func(s string, n *contentNode) bool { return n.p != nil },
+			SectionsFunc: nil,
 			Branch: sectionMapQueryCallBacks{
 				Key:      newSectionMapQueryKey(contentMapRoot, true),
 				Page:     handleBranch,
@@ -613,108 +671,93 @@ func (m *pageMap) assemblePages() error {
 			},
 		})
 
+	if m.cfg.taxonomyDisabled {
+		// Done.
+		return nil
+	}
+
+	for _, viewName := range m.cfg.taxonomyConfig {
+		taxonomy := m.Get(cleanTreeKey(viewName.plural))
+		if taxonomy == nil {
+			panic(fmt.Sprintf("tax not found")) // TODO1 move the creation here
+		}
+
+		handleTaxonomyEntries := func(b *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+			if n.p == nil {
+				panic("page is nil")
+			}
+			vals := types.ToStringSlicePreserveString(getParam(n.p, viewName.plural, false))
+			if vals == nil {
+				return false
+			}
+			w := getParamToLower(n.p, viewName.plural+"_weight")
+			weight, err := cast.ToIntE(w)
+			if err != nil {
+				m.s.Log.Errorf("Unable to convert taxonomy weight %#v to int for %q", w, n.p.Path())
+				// weight will equal zero, so let the flow continue
+			}
+
+			for i, v := range vals {
+				term := m.s.getTaxonomyKey(v)
+
+				bv := &contentNode{
+					p: n.p,
+					viewInfo: &contentBundleViewInfo{
+						ordinal:    i,
+						name:       viewName,
+						termKey:    term,
+						termOrigin: v,
+						weight:     weight,
+						ref:        n,
+					},
+				}
+
+				termKey := cleanTreeKey(term)
+				taxonomyTermKey := taxonomy.key + termKey
+
+				// It may have been added with the content files
+				termBranch := m.Get(taxonomyTermKey)
+
+				if termBranch == nil {
+
+					vic := &contentBundleViewInfo{
+						name:       viewName,
+						termKey:    term,
+						termOrigin: v,
+					}
+
+					n := &contentNode{viewInfo: vic}
+					n.p = m.s.newPage(n, taxonomy.n.p.bucket, page.KindTerm, vic.term(), viewName.plural, term)
+
+					termBranch = m.InsertSection(taxonomyTermKey, n)
+
+					n.p.treeRef = &contentTreeRef{
+						m:      m,
+						branch: termBranch,
+						key:    taxonomyTermKey,
+					}
+				}
+
+				termBranch.terms.nodes.Insert(s, bv)
+
+			}
+			return false
+		}
+
+		m.Walk(
+			sectionMapQuery{
+				Branch: sectionMapQueryCallBacks{
+					Key:  newSectionMapQueryKey(contentMapRoot, true),
+					Page: handleTaxonomyEntries,
+				},
+				Leaf: sectionMapQueryCallBacks{
+					Page: handleTaxonomyEntries,
+				},
+			})
+	}
+
 	// TODO 1	m.deleteOrphanSections()
 
-	return nil
-}
-
-func (m *contentBranchNode) assembleResources(key string, p *pageState, parentBucket *pagesMapBucket) error {
-	var err error
-
-	tree := m.pageResources
-	s := p.s
-
-	tree.nodes.WalkPrefix(key, func(key2 string, v interface{}) bool {
-		n := v.(*contentNode)
-		meta := n.fi.Meta()
-		classifier := meta.Classifier()
-		var r resource.Resource
-		switch classifier {
-		case files.ContentClassContent:
-			var rp *pageState
-			rp, err = m.newPageFromContentNode(s, n, parentBucket, p)
-			if err != nil {
-				return true
-			}
-			rp.m.resourcePath = filepath.ToSlash(strings.TrimPrefix(rp.Path(), p.File().Dir()))
-			r = rp
-
-		case files.ContentClassFile:
-			r, err = m.newResource(n.fi, p)
-			if err != nil {
-				return true
-			}
-		default:
-			panic(fmt.Sprintf("invalid classifier: %q", classifier))
-		}
-
-		p.resources = append(p.resources, r)
-		return false
-	})
-
-	return err
-}
-
-func (m *pageMap) assembleTaxonomies() error {
-	//panic("TODO1")
-	/*
-		var taxonomiesToDelete []string
-		var err error
-
-		m.taxonomies.Pages.Walk(func(s string, v interface{}) bool {
-			n := v.(*contentNode)
-
-			if n.p != nil {
-				return false
-			}
-
-			kind := n.viewInfo.kind()
-			sections := n.viewInfo.sections()
-
-			_, parent := m.getTaxonomyParent(s)
-			if parent == nil || parent.p == nil {
-				panic(fmt.Sprintf("BUG: parent not set for %q", s))
-			}
-			parentBucket := parent.p.bucket
-
-			if n.fi != nil {
-				n.p, err = m.newPageFromContentNode(n, parent.p.bucket, nil)
-				if err != nil {
-					return true
-				}
-			} else {
-				title := ""
-				if kind == page.KindTerm {
-					title = n.viewInfo.term()
-				}
-				n.p = m.s.newPage(n, parent.p.bucket, kind, title, sections...)
-			}
-
-			if !m.s.shouldBuild(n.p) {
-				taxonomiesToDelete = append(taxonomiesToDelete, s)
-				return false
-			}
-
-			n.p.treeRef = &contentTreeRef{
-				m:   m,
-				t:   m.taxonomies,
-				n:   n,
-				key: s,
-			}
-
-			if err = m.assembleResources(s, n.p, parentBucket); err != nil {
-				return true
-			}
-
-			return false
-		})
-
-		for _, s := range taxonomiesToDelete {
-			m.deleteTaxonomy(s)
-		}
-
-		return err
-	*/
 	return nil
 }
 
@@ -752,6 +795,7 @@ func (m *pageMap) attachPageToViews(s string, n *contentNode, b *contentBranchNo
 			}
 
 			key := cleanTreeKey(path.Join(term, s))
+
 			termKey := cleanTreeKey(term)
 			b.terms.nodes.Insert(key, bv)
 			// It may have been added from a content file.
@@ -776,6 +820,51 @@ func (m *pageMap) attachPageToViews(s string, n *contentNode, b *contentBranchNo
 	}
 
 	return nil
+}
+
+/*
+func (b *contentBranchNode) assembleResources(key string, p *pageState, parentBucket *pagesMapBucket) error {
+	var err error
+
+	tree := b.pageResources
+	s := p.s
+
+	tree.nodes.WalkPrefix(key, func(key2 string, v interface{}) bool {
+		n := v.(*contentNode)
+		meta := n.fi.Meta()
+		classifier := meta.Classifier()
+		var r resource.Resource
+		switch classifier {
+		case files.ContentClassContent:
+			var rp *pageState
+			rp, err = n.newPageFromContentNode(s, n, parentBucket, p)
+			if err != nil {
+				return true
+			}
+			rp.m.resourcePath = filepath.ToSlash(strings.TrimPrefix(rp.Path(), p.File().Dir()))
+			r = rp
+
+		case files.ContentClassFile:
+			r, err = n.newResource(n.fi, p)
+			if err != nil {
+				return true
+			}
+		default:
+			panic(fmt.Sprintf("invalid classifier: %q", classifier))
+		}
+
+		p.resources = append(p.resources, r)
+		return false
+	})
+
+	return err
+}
+TODO1 remove
+*/
+
+// TODO1 consolidate
+func (m *pageMap) assembleTaxonomies() error {
+	return m.createSiteTaxonomies()
 }
 
 type pageMapQueryKey struct {
@@ -888,7 +977,7 @@ func (m *pageMap) withEveryBundleNode(fn func(n *contentNode) bool) error {
 	}
 
 	q := sectionMapQuery{
-		Filter: func(s string, n *contentNode) bool { return n.p == nil },
+		Exclude: func(s string, n *contentNode) bool { return n.p == nil },
 		Branch: sectionMapQueryCallBacks{
 			Key:      newSectionMapQueryKey("", true),
 			Page:     callbackPage,
@@ -981,14 +1070,22 @@ func (m *pageMaps) walkBundles(fn func(n *contentNode) bool) error {
 	})
 }
 
-func (m *pageMaps) walkBranchesPrefix(prefix string, fn func(s string, n *contentNode) bool) {
-	panic("TODO1 walkBranchesPrefix")
-	/*_ = m.withMaps(func(pm *sectionMaps) error {
-		pm.branchTrees.WalkPrefix(prefix, func(s string, n *contentNode) bool {
+func (m *pageMaps) walkBranchesPrefix(prefix string, fn func(s string, n *contentNode) bool) error {
+	return m.withMaps(func(pm *pageMap) error {
+		callbackPage := func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
 			return fn(s, n)
-		})
-		return nil
-	})*/
+		}
+
+		q := sectionMapQuery{
+			OnlyBranches: true,
+			Branch: sectionMapQueryCallBacks{
+				Key:  newSectionMapQueryKey(prefix, true),
+				Page: callbackPage,
+			},
+		}
+
+		return pm.Walk(q)
+	})
 }
 
 func (m *pageMaps) withMaps(fn func(pm *pageMap) error) error {
@@ -1030,6 +1127,11 @@ func (b *pagesMapBucket) getRegularPagesRecursive() page.Pages {
 
 func (b *pagesMapBucket) getPagesAndSections() page.Pages {
 	b.pagesAndSectionsInit.Do(func() {
+
+		if b.owner.treeRef == nil {
+			panic("TODO1 nil get for " + b.owner.Kind())
+		}
+
 		b.pagesAndSections = b.owner.treeRef.getPagesAndSections()
 	})
 	return b.pagesAndSections

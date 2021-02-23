@@ -205,6 +205,8 @@ func (m *contentMap) AddFilesBundle(header hugofs.FileMetaInfo, resources ...hug
 		tree *contentTree
 	)
 
+	panic("TODO1")
+
 	if isBranch {
 		// Either a section or a taxonomy node.
 		section = bundlePath
@@ -228,6 +230,7 @@ func (m *contentMap) AddFilesBundle(header hugofs.FileMetaInfo, resources ...hug
 			m.sections.Pages.Insert(key, n)
 		}
 	} else {
+		panic("TODO1")
 		// A regular page. Attach it to its section.
 		// TODO1
 		section, _ = m.getOrCreateSection(n, bundlePath)
@@ -551,6 +554,7 @@ type ctree struct {
 }
 
 func (m *pageMap) AddFilesBundle(header hugofs.FileMetaInfo, resources ...hugofs.FileMetaInfo) error {
+
 	var (
 		meta       = header.Meta()
 		classifier = meta.Classifier()
@@ -560,6 +564,10 @@ func (m *pageMap) AddFilesBundle(header hugofs.FileMetaInfo, resources ...hugofs
 
 		pageTree *contentBranchNode
 	)
+
+	if !isBranch && m.cfg.pageDisabled {
+		return nil
+	}
 
 	if isBranch {
 		// Either a section or a taxonomy node.
@@ -863,9 +871,9 @@ func (c *contentTree) printKeysPrefix(prefix string) {
 
 // contentTreeRef points to a branch node in the given map.
 type contentTreeRef struct {
-	m   *pageMap // TODO1 used?
-	branch   *contentBranchNode
-	key string
+	m      *pageMap // TODO1 used?
+	branch *contentBranchNode
+	key    string
 }
 
 func (c *contentTreeRef) getCurrentSection() (string, *contentNode) {
@@ -876,26 +884,18 @@ func (c *contentTreeRef) getCurrentSection() (string, *contentNode) {
 }
 
 func (c *contentTreeRef) isSection() bool {
-	panic("TODO1 isSection")
-	return false // c.t == c.m.sections
+	return c.branch.n.p.IsSection()
 }
 
 func (c *contentTreeRef) getSection() (string, *contentNode) {
-	panic("TODO1 getSection")
-	/*
-		if c.t == c.m.taxonomies {
-			return c.m.getTaxonomyParent(c.key)
-		}
-		return c.m.getSection(c.key)
-	*/
-	return "", nil
+	return c.key, c.branch.n
 }
 
 func (c *contentTreeRef) getRegularPagesRecursive() page.Pages {
 	var pas page.Pages
 
 	q := sectionMapQuery{
-		Filter: c.branch.n.p.m.getListFilter(true),
+		Exclude: c.branch.n.p.m.getListFilter(true),
 		Branch: sectionMapQueryCallBacks{
 			Key: newSectionMapQueryKey(c.key+"/", true),
 		},
@@ -921,7 +921,6 @@ func (c *contentTreeRef) getPagesAndSections() page.Pages {
 		c.key+"/",
 		c.branch.n.p.m.getListFilter(true),
 		func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
-			//fmt.Println("===>", c.key, "=>", s)
 			pas = append(pas, n.p)
 			return false
 		},
@@ -937,7 +936,7 @@ func (c *contentTreeRef) getSections() page.Pages {
 
 	q := sectionMapQuery{
 		NoRecurse: true,
-		Filter:    c.branch.n.p.m.getListFilter(true),
+		Exclude:   c.branch.n.p.m.getListFilter(true),
 		Branch: sectionMapQueryCallBacks{
 			Key: newSectionMapQueryKey(c.key+"/", true),
 			Page: func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {

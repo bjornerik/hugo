@@ -1170,7 +1170,6 @@ func (s *Site) processPartial(config *BuildCfg, init func(config *BuildCfg) erro
 		}
 
 		filenamesChanged = helpers.UniqueStringsReuse(filenamesChanged)
-
 		if err := s.readAndProcessContent(filenamesChanged...); err != nil {
 			return err
 		}
@@ -1554,19 +1553,17 @@ func (s *Site) resetBuildState(sourceChanged bool) {
 	s.init.Reset()
 
 	if sourceChanged {
-		panic("TODO1")
-		/*		s.pageMap.contentMap.pageReverseIndex.Reset()
-				s.PageCollections = newPageCollections(s.pageMap)
-				s.pageMap.withEveryBundlePage(func(p *pageState) bool {
-					p.pagePages = &pagePages{}
-					if p.bucket != nil {
-						p.bucket.pagesMapBucketPages = &pagesMapBucketPages{}
-					}
-					p.parent = nil
-					p.Scratcher = maps.NewScratcher()
-					return false
-				})
-		*/
+		s.PageCollections = newPageCollections(s.pageMap)
+		s.pageMap.withEveryBundlePage(func(p *pageState) bool {
+			p.pagePages = &pagePages{}
+			if p.bucket != nil {
+				p.bucket.pagesMapBucketPages = &pagesMapBucketPages{}
+			}
+			p.parent = nil
+			p.Scratcher = maps.NewScratcher()
+			return false
+		})
+
 	} else {
 		s.pageMap.withEveryBundlePage(func(p *pageState) bool {
 			p.Scratcher = maps.NewScratcher()
