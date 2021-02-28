@@ -37,7 +37,7 @@ func (pt pageTree) IsAncestor(other interface{}) (bool, error) {
 
 	ref1, ref2 := pt.p.getTreeRef(), tp.getTreeRef()
 
-	if ref1 != nil && ref1.key == "/" {
+	if ref1 != nil && ref1.key == "" {
 		return true, nil
 	}
 
@@ -51,10 +51,6 @@ func (pt pageTree) IsAncestor(other interface{}) (bool, error) {
 	}
 
 	if ref1.key == ref2.key {
-		return true, nil
-	}
-
-	if strings.HasPrefix(ref2.key, ref1.key) {
 		return true, nil
 	}
 
@@ -83,7 +79,7 @@ func (pt pageTree) IsDescendant(other interface{}) (bool, error) {
 
 	ref1, ref2 := pt.p.getTreeRef(), tp.getTreeRef()
 
-	if ref2 != nil && ref2.key == "/" {
+	if ref2 != nil && ref2.key == "" {
 		return true, nil
 	}
 
@@ -97,10 +93,6 @@ func (pt pageTree) IsDescendant(other interface{}) (bool, error) {
 	}
 
 	if ref1.key == ref2.key {
-		return true, nil
-	}
-
-	if strings.HasPrefix(ref1.key, ref2.key) {
 		return true, nil
 	}
 

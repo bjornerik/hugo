@@ -600,9 +600,14 @@ func (m *pageMap) AddFilesBundle(header hugofs.FileMetaInfo, resources ...hugofs
 		// TODO1 b.ForResource("").DeleteAll()
 	}
 
+	resourceTree := pageTree.pageResources
+	if isBranch {
+		resourceTree = pageTree.resources
+	}
+
 	for _, r := range resources {
 		key := cleanTreeKey(r.Meta().Path())
-		pageTree.pageResources.nodes.Insert(key, &contentNode{fi: r})
+		resourceTree.nodes.Insert(key, &contentNode{fi: r})
 	}
 
 	return nil

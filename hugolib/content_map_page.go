@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gohugoio/hugo/common/types"
 	"github.com/spf13/cast"
@@ -462,7 +463,7 @@ func (m *pageMap) assemblePages() error {
 	defer func() {
 		for _, p := range pagesToDelete {
 			p.branch.pages.nodes.Delete(p.key)
-			p.branch.resources.nodes.Delete(p.key + "/")
+			p.branch.pageResources.nodes.Delete(p.key + "/")
 		}
 		for _, s := range sectionsToDelete {
 			m.sections.Delete(s)
@@ -470,6 +471,7 @@ func (m *pageMap) assemblePages() error {
 		}
 	}()
 
+	// TODO1 owner?
 	handleBranch := func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
 		if branch == nil && s != "" {
 			panic(fmt.Sprintf("no branch set for branch %q", s))
@@ -529,6 +531,8 @@ func (m *pageMap) assemblePages() error {
 			sectionsToDelete = append(sectionsToDelete, s)
 		}
 
+		branch.n.p.m.calculated.UpdateDateAndLastmodIfAfter(n.p.m.userProvided)
+
 		return false
 	}
 
@@ -561,17 +565,8 @@ func (m *pageMap) assemblePages() error {
 
 		if !m.s.shouldBuild(n.p) {
 			pagesToDelete = append(pagesToDelete, tref)
-		}
-
-		parent := branch
-
-		for {
-			parent.n.p.m.Dates.UpdateDateAndLastmodIfAfter(n.p.m.Dates)
-			if parent.n.p.bucket.parent == nil {
-				break
-			}
-			parent = parent.n.p.bucket.parent.self.treeRef.branch // TODO1
-			fmt.Println("PARE", parent.key, parent.n.p.m.Dates)
+		} else {
+			branch.n.p.m.calculated.UpdateDateAndLastmodIfAfter(n.p.m.userProvided)
 		}
 
 		return false
@@ -678,89 +673,160 @@ func (m *pageMap) assemblePages() error {
 			},
 		})
 
-	if m.cfg.taxonomyDisabled {
-		// Done.
-		return nil
-	}
-
-	for _, viewName := range m.cfg.taxonomyConfig {
-		taxonomy := m.Get(cleanTreeKey(viewName.plural))
-		if taxonomy == nil {
-			panic(fmt.Sprintf("tax not found")) // TODO1 move the creation here
-		}
-
-		handleTaxonomyEntries := func(b *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
-			if n.p == nil {
-				panic("page is nil")
+	if !m.cfg.taxonomyDisabled {
+		for _, viewName := range m.cfg.taxonomyConfig {
+			taxonomy := m.Get(cleanTreeKey(viewName.plural))
+			if taxonomy == nil {
+				panic(fmt.Sprintf("tax not found")) // TODO1 move the creation here
 			}
-			vals := types.ToStringSlicePreserveString(getParam(n.p, viewName.plural, false))
-			if vals == nil {
+
+			handleTaxonomyEntries := func(b *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+				if n.p == nil {
+					panic("page is nil")
+				}
+				vals := types.ToStringSlicePreserveString(getParam(n.p, viewName.plural, false))
+				if vals == nil {
+					return false
+				}
+				w := getParamToLower(n.p, viewName.plural+"_weight")
+				weight, err := cast.ToIntE(w)
+				if err != nil {
+					m.s.Log.Errorf("Unable to convert taxonomy weight %#v to int for %q", w, n.p.Path())
+					// weight will equal zero, so let the flow continue
+				}
+
+				for i, v := range vals {
+					term := m.s.getTaxonomyKey(v)
+
+					bv := &contentNode{
+						p: n.p,
+						viewInfo: &contentBundleViewInfo{
+							ordinal:    i,
+							name:       viewName,
+							termKey:    term,
+							termOrigin: v,
+							weight:     weight,
+							ref:        n,
+						},
+					}
+
+					termKey := cleanTreeKey(term)
+					taxonomyTermKey := taxonomy.key + termKey
+
+					// It may have been added with the content files
+					termBranch := m.Get(taxonomyTermKey)
+
+					if termBranch == nil {
+
+						vic := &contentBundleViewInfo{
+							name:       viewName,
+							termKey:    term,
+							termOrigin: v,
+						}
+
+						n := &contentNode{viewInfo: vic}
+						n.p = m.s.newPage(n, taxonomy.n.p.bucket, page.KindTerm, vic.term(), viewName.plural, term)
+
+						termBranch = m.InsertSection(taxonomyTermKey, n)
+
+						n.p.treeRef = &contentTreeRef{
+							m:      m,
+							branch: termBranch,
+							key:    taxonomyTermKey,
+						}
+					}
+
+					termBranch.terms.nodes.Insert(s, bv)
+
+					termBranch.n.p.m.calculated.UpdateDateAndLastmodIfAfter(n.p.m.calculated)
+
+				}
 				return false
 			}
-			w := getParamToLower(n.p, viewName.plural+"_weight")
-			weight, err := cast.ToIntE(w)
-			if err != nil {
-				m.s.Log.Errorf("Unable to convert taxonomy weight %#v to int for %q", w, n.p.Path())
-				// weight will equal zero, so let the flow continue
-			}
 
-			for i, v := range vals {
-				term := m.s.getTaxonomyKey(v)
-
-				bv := &contentNode{
-					p: n.p,
-					viewInfo: &contentBundleViewInfo{
-						ordinal:    i,
-						name:       viewName,
-						termKey:    term,
-						termOrigin: v,
-						weight:     weight,
-						ref:        n,
+			m.Walk(
+				sectionMapQuery{
+					Branch: sectionMapQueryCallBacks{
+						Key:  newSectionMapQueryKey(contentMapRoot, true),
+						Page: handleTaxonomyEntries,
 					},
-				}
+					Leaf: sectionMapQueryCallBacks{
+						Page: handleTaxonomyEntries,
+					},
+				},
+			)
+		}
 
-				termKey := cleanTreeKey(term)
-				taxonomyTermKey := taxonomy.key + termKey
+		// Finally, collect aggregate values from the content tree.
+		var (
+			siteLastChanged     time.Time
+			rootSectionCounters map[string]int
+		)
 
-				// It may have been added with the content files
-				termBranch := m.Get(taxonomyTermKey)
+		_, mainSectionsSet := m.s.s.Info.Params()["mainsections"]
+		if !mainSectionsSet {
+			rootSectionCounters = make(map[string]int)
+		}
 
-				if termBranch == nil {
-
-					vic := &contentBundleViewInfo{
-						name:       viewName,
-						termKey:    term,
-						termOrigin: v,
-					}
-
-					n := &contentNode{viewInfo: vic}
-					n.p = m.s.newPage(n, taxonomy.n.p.bucket, page.KindTerm, vic.term(), viewName.plural, term)
-
-					termBranch = m.InsertSection(taxonomyTermKey, n)
-
-					n.p.treeRef = &contentTreeRef{
-						m:      m,
-						branch: termBranch,
-						key:    taxonomyTermKey,
-					}
-				}
-
-				termBranch.terms.nodes.Insert(s, bv)
-
+		handleAggregatedValues := func(b *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+			if s == "" {
+				return false
 			}
+
+			if rootSectionCounters != nil {
+				// Keep track of the page count per root section
+				rootSection := s[1:]
+				firstSlash := strings.Index(rootSection, "/")
+				if firstSlash != -1 {
+					rootSection = rootSection[:firstSlash]
+				}
+				rootSectionCounters[rootSection] += b.pages.nodes.Len()
+			}
+
+			parent := b.n.p
+			for parent != nil {
+				parent.m.calculated.UpdateDateAndLastmodIfAfter(n.p.m.calculated)
+
+				if n.p.m.calculated.Lastmod().After(siteLastChanged) {
+					siteLastChanged = n.p.m.calculated.Lastmod()
+				}
+
+				if parent.bucket.parent == nil {
+					break
+				}
+
+				parent = parent.bucket.parent.self
+			}
+
 			return false
 		}
 
 		m.Walk(
 			sectionMapQuery{
+				OnlyBranches: true,
 				Branch: sectionMapQueryCallBacks{
 					Key:  newSectionMapQueryKey(contentMapRoot, true),
-					Page: handleTaxonomyEntries,
+					Page: handleAggregatedValues,
 				},
-				Leaf: sectionMapQueryCallBacks{
-					Page: handleTaxonomyEntries,
-				},
-			})
+			},
+		)
+
+		m.s.lastmod = siteLastChanged
+		if rootSectionCounters != nil {
+			var mainSection string
+			var mainSectionCount int
+
+			for k, v := range rootSectionCounters {
+				if v > mainSectionCount {
+					mainSection = k
+					mainSectionCount = v
+				}
+			}
+
+			mainSections := []string{mainSection}
+			m.s.s.Info.Params()["mainSections"] = mainSections
+			m.s.s.Info.Params()["mainsections"] = mainSections
+		}
 	}
 
 	// TODO 1	m.deleteOrphanSections()
@@ -1203,7 +1269,7 @@ type sectionAggregateHandler struct {
 }
 
 func (h *sectionAggregateHandler) String() string {
-	return fmt.Sprintf("%s/%s - %d - %s", h.sectionAggregate.datesAll, h.sectionAggregate.datesSection, h.sectionPageCount, h.s)
+	return "TODO1" // fmt.Sprintf("%s/%s - %d - %s", h.sectionAggregate.datesAll, h.sectionAggregate.datesSection, h.sectionPageCount, h.s)
 }
 
 func (h *sectionAggregateHandler) isRootSection() bool {
@@ -1243,7 +1309,7 @@ func (h *sectionAggregateHandler) handleSectionPost() error {
 	}
 
 	if resource.IsZeroDates(h.b.p) {
-		h.b.p.m.Dates = h.datesSection
+		//h.b.p.m.Dates = h.datesSection
 	}
 
 	h.datesSection = resource.Dates{}

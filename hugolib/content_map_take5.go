@@ -48,7 +48,7 @@ func (m *sectionMap) debug(prefix string, w io.Writer) {
 			fmt.Fprintf(w, "\t[%s] Page: %q\n", prefix, s)
 			return false
 		})
-		n.resources.Walk(func(s string, n *contentNode) bool {
+		n.pageResources.Walk(func(s string, n *contentNode) bool {
 			fmt.Fprintf(w, "\t[%s] Resource: %q\n", prefix, s)
 			return false
 		})
@@ -136,7 +136,7 @@ func (m *sectionMap) InsertResource(key string, n *contentNode) error {
 		return errors.Errorf("no section found for resource %q", key)
 	}
 
-	v.(*contentBranchNode).resources.nodes.Insert(key, n)
+	v.(*contentBranchNode).pageResources.nodes.Insert(key, n)
 
 	return nil
 }
@@ -307,10 +307,10 @@ func (m *sectionMap) Walk(q sectionMapQuery) error {
 			return false
 		}
 
-		if q.Leaf.Page != nil {
+		if q.Leaf.Page != nil || q.Leaf.Resource != nil {
 			bn.pages.nodes.Walk(func(s string, v interface{}) bool {
 				n := v.(*contentNode)
-				if q.Leaf.Page(bn, bn.n, s, n) {
+				if q.Leaf.Page != nil && q.Leaf.Page(bn, bn.n, s, n) {
 					return true
 				}
 				if q.Leaf.Resource != nil {
@@ -320,10 +320,6 @@ func (m *sectionMap) Walk(q sectionMapQuery) error {
 					})
 				}
 				return false
-			})
-		} else if q.Leaf.Resource != nil {
-			bn.pageResources.nodes.Walk(func(s string, v interface{}) bool {
-				return q.Leaf.Resource(bn, bn.n, s, v.(*contentNode))
 			})
 		}
 

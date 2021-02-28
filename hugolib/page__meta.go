@@ -47,6 +47,10 @@ import (
 
 var cjkRe = regexp.MustCompile(`\p{Han}|\p{Hangul}|\p{Hiragana}|\p{Katakana}`)
 
+var (
+	_ resource.Dated = (*pageMeta)(nil)
+)
+
 type pageMeta struct {
 	// kind is the discriminator that identifies the different page types
 	// in the different page collections. This can, as an example, be used
@@ -94,7 +98,7 @@ type pageMeta struct {
 
 	urlPaths pagemeta.URLPath
 
-	resource.Dates
+	pageMetaDates
 
 	// Set if this page is bundled inside another.
 	bundled bool
@@ -122,6 +126,34 @@ type pageMeta struct {
 	renderingConfigOverrides map[string]interface{}
 	contentConverterInit     sync.Once
 	contentConverter         converter.Converter
+}
+
+type pageMetaDates struct {
+	calculated   resource.Dates
+	userProvided resource.Dates
+}
+
+func (d *pageMetaDates) getDates() resource.Dates {
+	if !resource.IsZeroDates(d.userProvided) {
+		return d.userProvided
+	}
+	return d.calculated
+}
+
+func (d *pageMetaDates) Date() time.Time {
+	return d.getDates().Date()
+}
+
+func (d *pageMetaDates) Lastmod() time.Time {
+	return d.getDates().Lastmod()
+}
+
+func (d *pageMetaDates) PublishDate() time.Time {
+	return d.getDates().PublishDate()
+}
+
+func (d *pageMetaDates) ExpiryDate() time.Time {
+	return d.getDates().ExpiryDate()
 }
 
 func (p *pageMeta) Aliases() []string {
@@ -424,7 +456,7 @@ func (pm *pageMeta) setMetadata(parentBucket *pagesMapBucket, p *pageState, fron
 	descriptor := &pagemeta.FrontMatterDescriptor{
 		Frontmatter:   frontmatter,
 		Params:        pm.params,
-		Dates:         &pm.Dates,
+		Dates:         &pm.pageMetaDates.userProvided,
 		PageURLs:      &pm.urlPaths,
 		BaseFilename:  contentBaseName,
 		ModTime:       mtime,
@@ -717,14 +749,7 @@ func (p *pageMeta) applyDefaultValues(n *contentNode) error {
 		case page.KindHome:
 			p.title = p.s.Info.title
 		case page.KindSection:
-
-			var sectionName string
-			if n != nil {
-				sectionName = n.rootSection()
-			} else {
-				sectionName = p.sections[0]
-			}
-
+			sectionName := p.sections[0]
 			sectionName = helpers.FirstUpper(sectionName)
 			if p.s.Cfg.GetBool("pluralizeListTitles") {
 				p.title = flect.Pluralize(sectionName)
