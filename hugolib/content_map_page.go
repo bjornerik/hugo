@@ -139,7 +139,7 @@ func (m *pageMap) newPageFromContentNode(
 
 	n.p = ps
 	if ps.IsNode() {
-		ps.bucket = newPageBucket(ps)
+		ps.bucket = newPageBucket(parentBucket, ps)
 	}
 
 	gi, err := s.h.gitInfoForPage(ps)
@@ -505,7 +505,6 @@ func (m *pageMap) assemblePages() error {
 		// TODO1
 
 		if n.fi != nil {
-
 			n.p, err = m.newPageFromContentNode(m.s, n, bucket, nil)
 			if err != nil {
 				return true
@@ -547,7 +546,6 @@ func (m *pageMap) assemblePages() error {
 		// It may also be a taxonomy term.
 		if section.n.p.Kind() == page.KindTaxonomy {
 			kind = page.KindTerm
-
 		}
 
 		if n.fi != nil {
@@ -565,7 +563,16 @@ func (m *pageMap) assemblePages() error {
 			pagesToDelete = append(pagesToDelete, tref)
 		}
 
-		//m.attachPageToViews(s, n, branch)
+		parent := branch
+
+		for {
+			parent.n.p.m.Dates.UpdateDateAndLastmodIfAfter(n.p.m.Dates)
+			if parent.n.p.bucket.parent == nil {
+				break
+			}
+			parent = parent.n.p.bucket.parent.self.treeRef.branch // TODO1
+			fmt.Println("PARE", parent.key, parent.n.p.m.Dates)
+		}
 
 		return false
 	}
@@ -1103,7 +1110,8 @@ type pagesMapBucket struct {
 	// Cascading front matter.
 	cascade map[page.PageMatcher]maps.Params
 
-	owner *pageState // The branch node
+	parent *pagesMapBucket // The parent bucket, nil if the home page. TODO1 optimize LongestPrefix to use this.
+	self   *pageState      // The branch node (TODO1) move p.n here?
 
 	*pagesMapBucketPages
 }
@@ -1120,7 +1128,7 @@ type pagesMapBucketPages struct {
 }
 
 func (b *pagesMapBucket) getRegularPagesRecursive() page.Pages {
-	pages := b.owner.treeRef.getRegularPagesRecursive()
+	pages := b.self.treeRef.getRegularPagesRecursive()
 	page.SortByDefault(pages)
 	return pages
 }
@@ -1128,21 +1136,21 @@ func (b *pagesMapBucket) getRegularPagesRecursive() page.Pages {
 func (b *pagesMapBucket) getPagesAndSections() page.Pages {
 	b.pagesAndSectionsInit.Do(func() {
 
-		if b.owner.treeRef == nil {
-			panic("TODO1 nil get for " + b.owner.Kind())
+		if b.self.treeRef == nil {
+			panic("TODO1 nil get for " + b.self.Kind())
 		}
 
-		b.pagesAndSections = b.owner.treeRef.getPagesAndSections()
+		b.pagesAndSections = b.self.treeRef.getPagesAndSections()
 	})
 	return b.pagesAndSections
 }
 
 func (b *pagesMapBucket) getSections() page.Pages {
 	b.sectionsInit.Do(func() {
-		if b.owner.treeRef == nil {
+		if b.self.treeRef == nil {
 			return
 		}
-		b.sections = b.owner.treeRef.getSections()
+		b.sections = b.self.treeRef.getSections()
 	})
 
 	return b.sections
@@ -1150,7 +1158,7 @@ func (b *pagesMapBucket) getSections() page.Pages {
 
 func (b *pagesMapBucket) getTaxonomies() page.Pages {
 	// TODO1 b.sections/init
-	ref := b.owner.treeRef
+	ref := b.self.treeRef
 	if ref == nil {
 		return nil
 	}
@@ -1164,7 +1172,7 @@ func (b *pagesMapBucket) getTaxonomies() page.Pages {
 }
 
 func (b *pagesMapBucket) getTaxonomyEntries() page.Pages {
-	ref := b.owner.treeRef
+	ref := b.self.treeRef
 	if ref == nil {
 		return nil
 	}

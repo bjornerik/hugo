@@ -539,6 +539,7 @@ date: 2012-01-12
 	s := b.H.Sites[0]
 
 	checkDate := func(p page.Page, year int) {
+		b.Helper()
 		b.Assert(p.Date().Year(), qt.Equals, year)
 		b.Assert(p.Lastmod().Year(), qt.Equals, year)
 	}

@@ -92,8 +92,8 @@ func newPageBase(metaProvider *pageMeta) (*pageState, error) {
 	return ps, nil
 }
 
-func newPageBucket(p *pageState) *pagesMapBucket {
-	return &pagesMapBucket{owner: p, pagesMapBucketPages: &pagesMapBucketPages{}}
+func newPageBucket(parent *pagesMapBucket, self *pageState) *pagesMapBucket {
+	return &pagesMapBucket{parent: parent, self: self, pagesMapBucketPages: &pagesMapBucketPages{}}
 }
 
 func newPageFromMeta(
@@ -113,7 +113,7 @@ func newPageFromMeta(
 	bucket := parentBucket
 
 	if ps.IsNode() {
-		ps.bucket = newPageBucket(ps)
+		ps.bucket = newPageBucket(parentBucket, ps)
 	}
 
 	if meta != nil || parentBucket != nil {

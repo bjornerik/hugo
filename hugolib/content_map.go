@@ -392,7 +392,6 @@ func (m *contentMap) getOrCreateSection(n *contentNode, s string) (string, *cont
 	}
 
 	if !mustCreate {
-		fmt.Println("::::", k)
 		return k, b
 	}
 
