@@ -686,7 +686,33 @@ type contentTreeNodeFilter func(s string, n *contentNode) bool
 type contentTreeNodeCallback func(s string, n *contentNode) bool
 type contentTreeBranchNodeCallback func(s string, current *contentBranchNode) bool
 
-type contentTreeOwnerNodeCallback func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool
+type contentTreeOwnerNodeCallback func(
+	// The branch in which n belongs.
+	branch *contentBranchNode,
+
+	// Owner of n.
+	owner *contentNode,
+
+	// The key
+	key string,
+
+	// The content node, either a Page or a Resource.
+	n *contentNode,
+) bool
+
+type contentTreeOwnerBranchNodeCallback func(
+	// The branch in which n belongs.
+	branch *contentBranchNode,
+
+	// Owner of n.
+	owner *contentBranchNode,
+
+	// The key
+	key string,
+
+	// The content node, either a Page or a Resource.
+	n *contentNode,
+) bool
 
 type walkContentTreeCallbacksO struct {
 	// Either of these may be nil, but not all.
@@ -877,34 +903,36 @@ func (c *contentTree) printKeysPrefix(prefix string) {
 type contentTreeRef struct {
 	m      *pageMap // TODO1 used?
 	branch *contentBranchNode
+	owner  *contentBranchNode
 	key    string
+	n      *contentNode // TODO1 used?
 }
 
-func (c *contentTreeRef) getCurrentSection() (string, *contentNode) {
+func (c *contentTreeRef) getCurrentSection() *contentBranchNode {
 	if c.isSection() {
-		return c.key, c.branch.n
+		return c.owner
 	}
 	return c.getSection()
 }
 
 func (c *contentTreeRef) isSection() bool {
-	return c.branch.n.p.IsSection()
+	return c.branch != nil && c.branch != c.owner
 }
 
-func (c *contentTreeRef) getSection() (string, *contentNode) {
-	return c.key, c.branch.n
+func (c *contentTreeRef) getSection() *contentBranchNode {
+	return c.branch
 }
 
 func (c *contentTreeRef) getRegularPagesRecursive() page.Pages {
 	var pas page.Pages
 
 	q := sectionMapQuery{
-		Exclude: c.branch.n.p.m.getListFilter(true),
+		Exclude: c.n.p.m.getListFilter(true),
 		Branch: sectionMapQueryCallBacks{
 			Key: newSectionMapQueryKey(c.key+"/", true),
 		},
 		Leaf: sectionMapQueryCallBacks{
-			Page: func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+			Page: func(branch, owner *contentBranchNode, s string, n *contentNode) bool {
 				pas = append(pas, n.p)
 				return false
 			},
@@ -923,8 +951,8 @@ func (c *contentTreeRef) getPagesAndSections() page.Pages {
 
 	c.m.WalkPagesPrefixSectionNoRecurse(
 		c.key+"/",
-		c.branch.n.p.m.getListFilter(true),
-		func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+		c.n.p.m.getListFilter(true),
+		func(branch, owner *contentBranchNode, s string, n *contentNode) bool {
 			pas = append(pas, n.p)
 			return false
 		},
@@ -940,10 +968,10 @@ func (c *contentTreeRef) getSections() page.Pages {
 
 	q := sectionMapQuery{
 		NoRecurse: true,
-		Exclude:   c.branch.n.p.m.getListFilter(true),
+		Exclude:   c.n.p.m.getListFilter(true),
 		Branch: sectionMapQueryCallBacks{
 			Key: newSectionMapQueryKey(c.key+"/", true),
-			Page: func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+			Page: func(branch, owner *contentBranchNode, s string, n *contentNode) bool {
 				pas = append(pas, n.p)
 				return false
 			},

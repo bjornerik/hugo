@@ -342,7 +342,7 @@ func (m *pageMap) createListAllPages() page.Pages {
 
 	pages := make(page.Pages, 0)
 
-	m.WalkPagesPrefixSection("", contentTreeNoListAlwaysFilter, func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+	m.WalkPagesPrefixSection("", contentTreeNoListAlwaysFilter, func(branch, owner *contentBranchNode, s string, n *contentNode) bool {
 		if n.p == nil {
 			panic(fmt.Sprintf("BUG: page not set for %q", s))
 		}
@@ -426,12 +426,6 @@ func (m *pageMap) assembleSections() error {
 				return false
 			}
 
-			n.p.treeRef = &contentTreeRef{
-				m:   m,
-				t:   m.sections,
-				n:   n,
-				key: s,
-			}
 
 			if err = m.assembleResources(s, n.p, parentBucket); err != nil {
 				return true
@@ -472,7 +466,7 @@ func (m *pageMap) assemblePages() error {
 	}()
 
 	// TODO1 owner?
-	handleBranch := func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+	handleBranch := func(branch, owner *contentBranchNode, s string, n *contentNode) bool {
 		if branch == nil && s != "" {
 			panic(fmt.Sprintf("no branch set for branch %q", s))
 		}
@@ -484,7 +478,9 @@ func (m *pageMap) assemblePages() error {
 		tref := &contentTreeRef{
 			m:      m,
 			branch: branch,
+			owner:  owner,
 			key:    s,
+			n:      n,
 		}
 
 		if n.p != nil {
@@ -536,12 +532,14 @@ func (m *pageMap) assemblePages() error {
 		return false
 	}
 
-	handlePage := func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+	handlePage := func(branch, owner *contentBranchNode, s string, n *contentNode) bool {
 
 		tref := &contentTreeRef{
 			m:      m,
 			branch: branch,
+			owner:  owner,
 			key:    s,
+			n:      n,
 		}
 
 		section := branch
@@ -624,10 +622,12 @@ func (m *pageMap) assemblePages() error {
 			hn.n.p = m.s.newPage(hn.n, nil, page.KindHome, "", "")
 		}
 
-		// TODO1 rework this treeRef thing
 		hn.n.p.treeRef = &contentTreeRef{
 			m:      m,
-			branch: hn,
+			branch: nil,
+			owner:  nil,
+			key:    "",
+			n:      hn.n,
 		}
 
 	}
@@ -643,15 +643,16 @@ func (m *pageMap) assemblePages() error {
 					name: viewName,
 				},
 			}
-			if m.s.home == nil {
-				panic("home not set")
-			}
+
 			branch := m.InsertSection(key, n)
 			n.p = m.s.newPage(n, m.s.home.bucket, page.KindTaxonomy, "", viewName.plural)
+
 			n.p.treeRef = &contentTreeRef{
 				m:      m,
-				branch: branch,
+				branch: hn,
+				owner:  branch,
 				key:    key,
+				n:      n,
 			}
 
 		}
@@ -680,7 +681,7 @@ func (m *pageMap) assemblePages() error {
 				panic(fmt.Sprintf("tax not found")) // TODO1 move the creation here
 			}
 
-			handleTaxonomyEntries := func(b *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+			handleTaxonomyEntries := func(b, owner *contentBranchNode, s string, n *contentNode) bool {
 				if n.p == nil {
 					panic("page is nil")
 				}
@@ -731,8 +732,10 @@ func (m *pageMap) assemblePages() error {
 
 						n.p.treeRef = &contentTreeRef{
 							m:      m,
-							branch: termBranch,
+							branch: taxonomy,
+							owner:  termBranch,
 							key:    taxonomyTermKey,
+							n:      n,
 						}
 					}
 
@@ -768,7 +771,7 @@ func (m *pageMap) assemblePages() error {
 			rootSectionCounters = make(map[string]int)
 		}
 
-		handleAggregatedValues := func(b *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+		handleAggregatedValues := func(b, owner *contentBranchNode, s string, n *contentNode) bool {
 			if s == "" {
 				return false
 			}
@@ -885,6 +888,7 @@ func (m *pageMap) attachPageToViews(s string, n *contentNode, b *contentBranchNo
 					m:      m,
 					branch: b,
 					key:    termKey,
+					n:      n,
 				}
 
 				b.pages.nodes.Insert(termKey, n)
@@ -1041,7 +1045,7 @@ func (m *pageMap) withEveryBundlePage(fn func(p *pageState) bool) error {
 }
 
 func (m *pageMap) withEveryBundleNode(fn func(n *contentNode) bool) error {
-	callbackPage := func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+	callbackPage := func(branch, owner *contentBranchNode, s string, n *contentNode) bool {
 		return fn(n)
 	}
 
@@ -1145,7 +1149,7 @@ func (m *pageMaps) walkBundles(fn func(n *contentNode) bool) error {
 
 func (m *pageMaps) walkBranchesPrefix(prefix string, fn func(s string, n *contentNode) bool) error {
 	return m.withMaps(func(pm *pageMap) error {
-		callbackPage := func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+		callbackPage := func(branch, owner *contentBranchNode, s string, n *contentNode) bool {
 			return fn(s, n)
 		}
 
@@ -1229,7 +1233,7 @@ func (b *pagesMapBucket) getTaxonomies() page.Pages {
 		return nil
 	}
 	var pas page.Pages
-	ref.branch.pages.WalkPrefix(ref.key+"/", func(s string, n *contentNode) bool {
+	ref.owner.pages.WalkPrefix(ref.key+"/", func(s string, n *contentNode) bool {
 		pas = append(pas, n.p)
 		return false
 	})
@@ -1243,7 +1247,9 @@ func (b *pagesMapBucket) getTaxonomyEntries() page.Pages {
 		return nil
 	}
 	var pas page.Pages
-	ref.branch.terms.WalkPrefix(ref.key+"/", func(s string, n *contentNode) bool {
+
+	// TODO1 do we need the prefix?
+	ref.owner.terms.WalkPrefix(ref.key+"/", func(s string, n *contentNode) bool {
 		pas = append(pas, n.p)
 		return false
 	})

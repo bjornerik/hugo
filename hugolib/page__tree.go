@@ -17,6 +17,8 @@ import (
 	"path"
 	"strings"
 
+	"github.com/gohugoio/hugo/common/herrors"
+
 	"github.com/gohugoio/hugo/common/types"
 	"github.com/gohugoio/hugo/resources/page"
 )
@@ -47,7 +49,7 @@ func (pt pageTree) IsAncestor(other interface{}) (bool, error) {
 			return false, nil
 		}
 
-		return ref1.branch.n.p.IsHome(), nil
+		return ref1.n.p.IsHome(), nil
 	}
 
 	if ref1.key == ref2.key {
@@ -89,7 +91,7 @@ func (pt pageTree) IsDescendant(other interface{}) (bool, error) {
 			return false, nil
 		}
 
-		return ref2.branch.n.p.IsHome(), nil
+		return ref2.n.p.IsHome(), nil
 	}
 
 	if ref1.key == ref2.key {
@@ -100,6 +102,7 @@ func (pt pageTree) IsDescendant(other interface{}) (bool, error) {
 }
 
 func (pt pageTree) FirstSection() page.Page {
+	defer herrors.Recover()
 	ref := pt.p.getTreeRef()
 	if ref == nil {
 		return pt.p.s.home
@@ -134,13 +137,13 @@ func (pt pageTree) InSection(other interface{}) (bool, error) {
 			// A 404 or other similar standalone page.
 			return false, nil
 		}
-		return ref1.branch.n.p.IsHome(), nil
+		return ref1.n.p.IsHome(), nil
 	}
 
-	s1, _ := ref1.getCurrentSection()
-	s2, _ := ref2.getCurrentSection()
+	b1 := ref1.getCurrentSection()
+	b2 := ref2.getCurrentSection()
 
-	return s1 == s2, nil
+	return b1 == b2, nil
 }
 
 func (pt pageTree) Page() page.Page {
@@ -148,37 +151,25 @@ func (pt pageTree) Page() page.Page {
 }
 
 func (pt pageTree) Parent() page.Page {
+	defer herrors.Recover()
+
 	p := pt.p
 
-	if p.parent != nil {
+	if pt.p.parent != nil {
 		return p.parent
-	}
-
-	if pt.p.IsHome() {
-		return nil
 	}
 
 	tree := p.getTreeRef()
 
-	if tree == nil || tree.key == "" || pt.p.Kind() == page.KindTaxonomy {
-		return pt.p.s.home
-	}
-
-	if !pt.p.IsSection() {
-		return tree.branch.n.p
-	}
-
-	//
-	_, b := tree.m.LongestPrefix(path.Dir(tree.key))
-
-	if b == nil {
+	if tree.owner == nil {
 		return nil
 	}
 
-	return b.n.p
+	return tree.owner.n.p
 }
 
 func (pt pageTree) Sections() page.Pages {
+	defer herrors.Recover() // TODO1
 	if pt.p.bucket == nil {
 		return nil
 	}

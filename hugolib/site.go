@@ -291,6 +291,7 @@ func (s *Site) prepareInits() {
 					return false
 				},
 			)
+			page.SortByDefault(pas)
 			setNextPrev(pas)
 			return false
 		})
@@ -323,7 +324,7 @@ func (s *Site) initRenderFormats() {
 	formatSet := make(map[string]bool)
 	formats := output.Formats{}
 
-	s.pageMap.WalkPagesPrefixSection("", contentTreeNoRenderFilter, func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+	s.pageMap.WalkPagesPrefixSection("", contentTreeNoRenderFilter, func(branch, owner *contentBranchNode, s string, n *contentNode) bool {
 		for _, f := range n.p.m.configuredOutputFormats {
 			if !formatSet[f.Name] {
 				formats = append(formats, f)

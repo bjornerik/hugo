@@ -185,7 +185,7 @@ func (m *sectionMap) GetPageNode(key string) *contentNode {
 	return nil
 }
 
-func (m *sectionMap) WalkPagesPrefixSection(prefix string, filter contentTreeNodeCallback, callback contentTreeOwnerNodeCallback) error {
+func (m *sectionMap) WalkPagesPrefixSection(prefix string, filter contentTreeNodeCallback, callback contentTreeOwnerBranchNodeCallback) error {
 	q := sectionMapQuery{
 		Exclude: filter,
 		Branch: sectionMapQueryCallBacks{
@@ -199,7 +199,7 @@ func (m *sectionMap) WalkPagesPrefixSection(prefix string, filter contentTreeNod
 	return m.Walk(q)
 }
 
-func (m *sectionMap) WalkPagesPrefixSectionNoRecurse(prefix string, filter contentTreeNodeCallback, callback contentTreeOwnerNodeCallback) error {
+func (m *sectionMap) WalkPagesPrefixSectionNoRecurse(prefix string, filter contentTreeNodeCallback, callback contentTreeOwnerBranchNodeCallback) error {
 	q := sectionMapQuery{
 		NoRecurse: true,
 		Exclude:   filter,
@@ -224,8 +224,21 @@ func (m *sectionMap) Walk(q sectionMapQuery) error {
 	}
 
 	if q.Exclude != nil {
-		// Apply global node filter.
-		applyFilter := func(c contentTreeOwnerNodeCallback) contentTreeOwnerNodeCallback {
+		// Apply global node filters.
+		applyFilterPage := func(c contentTreeOwnerBranchNodeCallback) contentTreeOwnerBranchNodeCallback {
+			if c == nil {
+				return nil
+			}
+			return func(branch, owner *contentBranchNode, s string, n *contentNode) bool {
+				if q.Exclude(s, n) {
+					// Skip this node, but continue walk.
+					return false
+				}
+				return c(branch, owner, s, n)
+			}
+		}
+
+		applyFilterResource := func(c contentTreeOwnerNodeCallback) contentTreeOwnerNodeCallback {
 			if c == nil {
 				return nil
 			}
@@ -238,10 +251,10 @@ func (m *sectionMap) Walk(q sectionMapQuery) error {
 			}
 		}
 
-		q.Branch.Page = applyFilter(q.Branch.Page)
-		q.Branch.Resource = applyFilter(q.Branch.Resource)
-		q.Leaf.Page = applyFilter(q.Leaf.Page)
-		q.Leaf.Resource = applyFilter(q.Leaf.Resource)
+		q.Branch.Page = applyFilterPage(q.Branch.Page)
+		q.Branch.Resource = applyFilterResource(q.Branch.Resource)
+		q.Leaf.Page = applyFilterPage(q.Leaf.Page)
+		q.Leaf.Resource = applyFilterResource(q.Leaf.Resource)
 
 	}
 
@@ -290,7 +303,7 @@ func (m *sectionMap) Walk(q sectionMapQuery) error {
 		}
 
 		if depth <= depthBranch {
-			if q.Branch.Page != nil && q.Branch.Page(parentBranch, bn.n, s, bn.n) {
+			if q.Branch.Page != nil && q.Branch.Page(parentBranch, bn, s, bn.n) {
 				return false
 			}
 
@@ -310,7 +323,7 @@ func (m *sectionMap) Walk(q sectionMapQuery) error {
 		if q.Leaf.Page != nil || q.Leaf.Resource != nil {
 			bn.pages.nodes.Walk(func(s string, v interface{}) bool {
 				n := v.(*contentNode)
-				if q.Leaf.Page != nil && q.Leaf.Page(bn, bn.n, s, n) {
+				if q.Leaf.Page != nil && q.Leaf.Page(bn, bn, s, n) {
 					return true
 				}
 				if q.Leaf.Resource != nil {
@@ -393,7 +406,7 @@ func (m *sectionMap) Walk(q sectionMapQuery) error {
 		return nil
 	}
 
-	if q.Leaf.Page != nil && q.Leaf.Page(section, section.n, q.Leaf.Key.Value, v.(*contentNode)) {
+	if q.Leaf.Page != nil && q.Leaf.Page(section, section, q.Leaf.Key.Value, v.(*contentNode)) {
 		return nil
 	}
 
@@ -471,7 +484,7 @@ type sectionMapQuery struct {
 
 type sectionMapQueryCallBacks struct {
 	Key      sectionMapQueryKey
-	Page     contentTreeOwnerNodeCallback
+	Page     contentTreeOwnerBranchNodeCallback
 	Resource contentTreeOwnerNodeCallback
 }
 

@@ -16,6 +16,8 @@ package hugolib
 import (
 	"sync"
 
+	"github.com/gohugoio/hugo/common/herrors"
+
 	"github.com/gohugoio/hugo/resources/page"
 )
 
@@ -69,6 +71,8 @@ func (p *pagePaginator) Paginate(seq interface{}, options ...interface{}) (*page
 }
 
 func (p *pagePaginator) Paginator(options ...interface{}) (*page.Pager, error) {
+	defer herrors.Recover()
+
 	var initErr error
 	p.init.Do(func() {
 		pagerSize, err := page.ResolvePagerSize(p.source.s.Cfg, options...)

@@ -158,8 +158,8 @@ func TestSectionMap(t *testing.T) {
 		}
 
 		var (
-			handleSection        func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool
-			handlePage           func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool
+			handleSection        func(branch, owner *contentBranchNode, s string, n *contentNode) bool
+			handlePage           func(branch, owner *contentBranchNode, s string, n *contentNode) bool
 			handleLeafResource   func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool
 			handleBranchResource func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool
 
@@ -174,14 +174,14 @@ func TestSectionMap(t *testing.T) {
 		}
 
 		if spec.doBranch {
-			handleSection = func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+			handleSection = func(branch, owner *contentBranchNode, s string, n *contentNode) bool {
 				addResult("section", s)
 				return false
 			}
 		}
 
 		if spec.doPage {
-			handlePage = func(branch *contentBranchNode, owner *contentNode, s string, n *contentNode) bool {
+			handlePage = func(branch, owner *contentBranchNode, s string, n *contentNode) bool {
 				addResult("page", s)
 				return false
 			}

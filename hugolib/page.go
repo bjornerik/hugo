@@ -247,10 +247,8 @@ func (p *pageState) RegularPages() page.Pages {
 }
 
 func (p *pageState) Pages() page.Pages {
-	defer herrors.Recover() // TODO1
 	p.pagesInit.Do(func() {
 		var pages page.Pages
-
 		switch p.Kind() {
 		case page.KindPage:
 		case page.KindSection, page.KindHome:
