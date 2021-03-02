@@ -245,7 +245,7 @@ func doTestMultiSitesBuild(t *testing.T, configTemplate, configSuffix string) {
 	// dumpPages(enSite.RegularPages()...)
 
 	c.Assert(len(enSite.RegularPages()), qt.Equals, 5)
-	c.Assert(len(enSite.AllPages()), qt.Equals, 32)
+	dumpPagesLinks(enSite.AllPages()...)
 
 	// Check 404s
 	b.AssertFileContent("public/en/404.html", "404|en|404 Page not found")

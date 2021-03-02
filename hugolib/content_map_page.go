@@ -51,11 +51,82 @@ func newPageMaps(h *HugoSites) *pageMaps {
 	}
 }
 
+func newPageMap(s *Site) *pageMap {
+
+	m := &pageMap{
+		cfg: contentMapConfig{
+			lang:                 s.Lang(),
+			taxonomyConfig:       s.siteCfg.taxonomiesConfig.Values(),
+			taxonomyDisabled:     !s.isEnabled(page.KindTerm),
+			taxonomyTermDisabled: !s.isEnabled(page.KindTaxonomy),
+			pageDisabled:         !s.isEnabled(page.KindPage),
+		},
+		s:          s,
+		sectionMap: newSectionMap(),
+	}
+
+	m.pageReverseIndex = &contentTreeReverseIndex2{
+		initFn: func(rm map[interface{}]*contentNode) {
+			m.WalkPagesPrefixSection("", contentTreeNoListAlwaysFilter, func(branch, owner *contentBranchNode, s string, n *contentNode) bool {
+				if n.p != nil && !n.p.File().IsZero() {
+					//meta := n.p.File().FileInfo().Meta()
+					// TODO1 PathFile usage
+					/*if meta.Path() != meta.PathFile() {
+						// Keep track of the original mount source.
+						mountKey := filepath.ToSlash(filepath.Join(meta.Module(), meta.PathFile()))
+						addToReverseMap(mountKey, n, m)
+					}*/
+				}
+				// 					k := strings.TrimPrefix(strings.TrimSuffix(path.Base(s), cmLeafSeparator), contentMapNodeSeparator)
+				k := cleanTreeKey(path.Base(s))
+				existing, found := rm[k]
+				if found && existing != ambiguousContentNode {
+					rm[k] = ambiguousContentNode
+				} else if !found {
+					rm[k] = n
+				}
+				return false
+			})
+
+		},
+		contentTreeReverseIndexMap2: &contentTreeReverseIndexMap2{},
+	}
+
+	return m
+}
+
 type pageMap struct {
 	cfg contentMapConfig
 	s   *Site
 
 	*sectionMap
+
+	// A reverse index used as a fallback in GetPage for short references.
+	pageReverseIndex *contentTreeReverseIndex2
+}
+
+type contentTreeReverseIndex2 struct {
+	initFn func(rm map[interface{}]*contentNode)
+	*contentTreeReverseIndexMap2
+}
+
+type contentTreeReverseIndexMap2 struct {
+	init sync.Once
+	m    map[interface{}]*contentNode
+}
+
+func (c *contentTreeReverseIndex2) Reset() {
+	c.contentTreeReverseIndexMap2 = &contentTreeReverseIndexMap2{
+		m: make(map[interface{}]*contentNode),
+	}
+}
+
+func (c *contentTreeReverseIndex2) Get(key interface{}) *contentNode {
+	c.init.Do(func() {
+		c.m = make(map[interface{}]*contentNode)
+		c.initFn(c.contentTreeReverseIndexMap2.m)
+	})
+	return c.m[key]
 }
 
 func (m *pageMap) Len() int {
@@ -284,7 +355,7 @@ func (m *pageMap) createSiteTaxonomies() error {
 		m.WalkBranchesPrefix(cleanTreeKey(viewName.plural)+"/", func(s string, b *contentBranchNode) bool {
 			b.terms.Walk(func(s string, n *contentNode) bool {
 				info := n.viewInfo
-				taxonomy.add(info.termKey, page.NewWeightedPage(info.weight, info.ref.p, n.p))
+				taxonomy.add(info.termKey, page.NewWeightedPage(info.weight, info.ref.p, b.n.p))
 				return false
 			})
 			return false
@@ -454,18 +525,7 @@ func (m *pageMap) assemblePages() error {
 	// because front matter dictated it (e.g. a draft).
 	var sectionsToDelete []string
 	var pagesToDelete []*contentTreeRef
-	defer func() {
-		for _, p := range pagesToDelete {
-			p.branch.pages.nodes.Delete(p.key)
-			p.branch.pageResources.nodes.Delete(p.key + "/")
-		}
-		for _, s := range sectionsToDelete {
-			m.sections.Delete(s)
-			m.sections.DeletePrefix(s + "/")
-		}
-	}()
 
-	// TODO1 owner?
 	handleBranch := func(branch, owner *contentBranchNode, s string, n *contentNode) bool {
 		if branch == nil && s != "" {
 			panic(fmt.Sprintf("no branch set for branch %q", s))
@@ -619,7 +679,7 @@ func (m *pageMap) assemblePages() error {
 				return err
 			}
 		} else {
-			hn.n.p = m.s.newPage(hn.n, nil, page.KindHome, "", "")
+			hn.n.p = m.s.newPage(hn.n, nil, page.KindHome, "")
 		}
 
 		hn.n.p.treeRef = &contentTreeRef{
@@ -674,6 +734,24 @@ func (m *pageMap) assemblePages() error {
 			},
 		})
 
+	if err != nil {
+		return err
+	}
+
+	// Delete pages and sections marked for deletion.
+	for _, p := range pagesToDelete {
+		p.branch.pages.nodes.Delete(p.key)
+		p.branch.pageResources.nodes.Delete(p.key + "/")
+		if p.branch.n.fi == nil && p.branch.pages.nodes.Len() == 0 {
+			// Delete orphan section.
+			sectionsToDelete = append(sectionsToDelete, p.branch.key)
+		}
+	}
+	for _, s := range sectionsToDelete {
+		m.sections.Delete(s)
+		m.sections.DeletePrefix(s + "/")
+	}
+
 	if !m.cfg.taxonomyDisabled {
 		for _, viewName := range m.cfg.taxonomyConfig {
 			taxonomy := m.Get(cleanTreeKey(viewName.plural))
@@ -683,7 +761,7 @@ func (m *pageMap) assemblePages() error {
 
 			handleTaxonomyEntries := func(b, owner *contentBranchNode, s string, n *contentNode) bool {
 				if n.p == nil {
-					panic("page is nil")
+					panic("page is nil: " + s)
 				}
 				vals := types.ToStringSlicePreserveString(getParam(n.p, viewName.plural, false))
 				if vals == nil {
@@ -832,73 +910,10 @@ func (m *pageMap) assemblePages() error {
 		}
 	}
 
-	// TODO 1	m.deleteOrphanSections()
-
 	return nil
 }
 
 // TODO1 error handling
-func (m *pageMap) attachPageToViews(s string, n *contentNode, b *contentBranchNode) error {
-	if m.cfg.taxonomyDisabled {
-		return nil
-	}
-
-	for _, viewName := range m.cfg.taxonomyConfig {
-		vals := types.ToStringSlicePreserveString(getParam(n.p, viewName.plural, false))
-		if vals == nil {
-			continue
-		}
-		w := getParamToLower(n.p, viewName.plural+"_weight")
-		weight, err := cast.ToIntE(w)
-		if err != nil {
-			m.s.Log.Errorf("Unable to convert taxonomy weight %#v to int for %q", w, n.p.Path())
-			// weight will equal zero, so let the flow continue
-		}
-
-		for i, v := range vals {
-			term := m.s.getTaxonomyKey(v)
-
-			bv := &contentNode{
-				p: n.p,
-				viewInfo: &contentBundleViewInfo{
-					ordinal:    i,
-					name:       viewName,
-					termKey:    term,
-					termOrigin: v,
-					weight:     weight,
-					ref:        n,
-				},
-			}
-
-			key := cleanTreeKey(path.Join(term, s))
-
-			termKey := cleanTreeKey(term)
-			b.terms.nodes.Insert(key, bv)
-			// It may have been added from a content file.
-			if !b.pages.Has(termKey) {
-				vic := &contentBundleViewInfo{
-					name:       viewName,
-					termKey:    term,
-					termOrigin: v,
-				}
-				n := &contentNode{viewInfo: vic}
-				n.p = m.s.newPage(n, b.n.p.bucket, page.KindTerm, "", viewName.plural, term)
-
-				n.p.treeRef = &contentTreeRef{
-					m:      m,
-					branch: b,
-					key:    termKey,
-					n:      n,
-				}
-
-				b.pages.nodes.Insert(termKey, n)
-			}
-		}
-	}
-
-	return nil
-}
-
 /*
 func (b *contentBranchNode) assembleResources(key string, p *pageState, parentBucket *pagesMapBucket) error {
 	var err error
@@ -1203,6 +1218,11 @@ func (b *pagesMapBucket) getRegularPagesRecursive() page.Pages {
 	return pages
 }
 
+func (b *pagesMapBucket) getRegularPages() page.Pages {
+	pages := b.self.treeRef.getRegularPages()
+	page.SortByDefault(pages)
+	return pages
+}
 func (b *pagesMapBucket) getPagesAndSections() page.Pages {
 	b.pagesAndSectionsInit.Do(func() {
 
@@ -1248,8 +1268,7 @@ func (b *pagesMapBucket) getTaxonomyEntries() page.Pages {
 	}
 	var pas page.Pages
 
-	// TODO1 do we need the prefix?
-	ref.owner.terms.WalkPrefix(ref.key+"/", func(s string, n *contentNode) bool {
+	ref.owner.terms.Walk(func(s string, n *contentNode) bool {
 		pas = append(pas, n.p)
 		return false
 	})

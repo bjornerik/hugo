@@ -20,6 +20,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/gohugoio/hugo/helpers"
+
 	"github.com/gohugoio/hugo/hugofs"
 
 	"github.com/gohugoio/hugo/hugofs/files"
@@ -233,12 +235,7 @@ func shouldDoSimpleLookup(ref string) bool {
 }
 
 func (c *PageCollections) getContentNode(context page.Page, isReflink bool, ref string) (*contentNode, error) {
-
 	navUp := strings.HasPrefix(ref, "..")
-	var doSimpleLookup bool
-	if isReflink || context == nil {
-		doSimpleLookup = shouldDoSimpleLookup(ref)
-	}
 
 	if context != nil && !strings.HasPrefix(ref, "/") {
 		// Try the page-relative path.
@@ -262,7 +259,21 @@ func (c *PageCollections) getContentNode(context page.Page, isReflink bool, ref 
 
 	m := c.pageMap
 
-	refKey := cleanTreeKey(ref)
+	refKey := helpers.PathNoExt(cleanTreeKey(ref))
+	if refKey == "" {
+		// Home page.
+		b := c.pageMap.Get(refKey)
+		if b == nil {
+			return nil, nil
+		}
+		return b.n, nil
+	}
+
+	var doSimpleLookup bool
+	if isReflink || context == nil {
+		doSimpleLookup = shouldDoSimpleLookup(ref)
+	}
+
 	n := m.GetPageNode(refKey)
 	if n != nil {
 		return n, nil
@@ -283,6 +294,17 @@ func (c *PageCollections) getContentNode(context page.Page, isReflink bool, ref 
 	if !doSimpleLookup {
 		return nil, nil
 	}
+
+	n = m.pageReverseIndex.Get(refKey)
+
+	if n != nil {
+		if n == ambiguousContentNode {
+			return nil, fmt.Errorf("page reference %q is ambiguous", ref)
+		}
+		return n, nil
+	}
+
+	return nil, nil
 
 	// TODO simple
 

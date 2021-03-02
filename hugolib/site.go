@@ -1466,23 +1466,20 @@ func (s *Site) assembleMenus() {
 	}
 
 	// Add menu entries provided by pages
-	panic("TODO1")
-	/*
-		s.pageMap.pageTrees.WalkRenderable(func(ss string, n *contentNode) bool {
-			p := n.p
+	s.pageMap.WalkPagesPrefixSection("", contentTreeNoRenderFilter, func(branch, owner *contentBranchNode, ss string, n *contentNode) bool {
+		p := n.p
 
-			for name, me := range p.pageMenus.menus() {
-				if _, ok := flat[twoD{name, me.KeyName()}]; ok {
-					err := p.wrapError(errors.Errorf("duplicate menu entry with identifier %q in menu %q", me.KeyName(), name))
-					s.Log.Warnln(err)
-					continue
-				}
-				flat[twoD{name, me.KeyName()}] = me
+		for name, me := range p.pageMenus.menus() {
+			if _, ok := flat[twoD{name, me.KeyName()}]; ok {
+				err := p.wrapError(errors.Errorf("duplicate menu entry with identifier %q in menu %q", me.KeyName(), name))
+				s.Log.Warnln(err)
+				continue
 			}
+			flat[twoD{name, me.KeyName()}] = me
+		}
 
-			return false
-		})
-	*/
+		return false
+	})
 
 	// Create Children Menus First
 	for _, e := range flat {
@@ -1810,6 +1807,10 @@ func (s *Site) newPage(
 	m := map[string]interface{}{}
 	if title != "" {
 		m["title"] = title
+	}
+
+	if kind == page.KindHome && len(sections) > 0 {
+		panic("TODO1 home has no sections")
 	}
 
 	p, err := newPageFromMeta(

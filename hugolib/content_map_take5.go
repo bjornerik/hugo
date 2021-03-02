@@ -136,7 +136,7 @@ func (m *sectionMap) InsertResource(key string, n *contentNode) error {
 		return errors.Errorf("no section found for resource %q", key)
 	}
 
-	v.(*contentBranchNode).pageResources.nodes.Insert(key, n)
+	v.(*contentBranchNode).resources.nodes.Insert(key, n)
 
 	return nil
 }
@@ -185,9 +185,14 @@ func (m *sectionMap) GetPageNode(key string) *contentNode {
 	return nil
 }
 
+var noTaxonomiesFilter = func(s string, n *contentNode) bool {
+	return n != nil && n.isTaxonomyNode()
+}
+
 func (m *sectionMap) WalkPagesPrefixSection(prefix string, filter contentTreeNodeCallback, callback contentTreeOwnerBranchNodeCallback) error {
 	q := sectionMapQuery{
 		Exclude: filter,
+		// TODO1 BranchExclude: noTaxonomiesFilter,
 		Branch: sectionMapQueryCallBacks{
 			Key:  newSectionMapQueryKey(prefix, true),
 			Page: callback,
@@ -201,8 +206,9 @@ func (m *sectionMap) WalkPagesPrefixSection(prefix string, filter contentTreeNod
 
 func (m *sectionMap) WalkPagesPrefixSectionNoRecurse(prefix string, filter contentTreeNodeCallback, callback contentTreeOwnerBranchNodeCallback) error {
 	q := sectionMapQuery{
-		NoRecurse: true,
-		Exclude:   filter,
+		NoRecurse:     true,
+		Exclude:       filter,
+		BranchExclude: noTaxonomiesFilter,
 		Branch: sectionMapQueryCallBacks{
 			Key:  newSectionMapQueryKey(prefix, true),
 			Page: callback,
@@ -256,6 +262,16 @@ func (m *sectionMap) Walk(q sectionMapQuery) error {
 		q.Leaf.Page = applyFilterPage(q.Leaf.Page)
 		q.Leaf.Resource = applyFilterResource(q.Leaf.Resource)
 
+	}
+
+	if q.BranchExclude != nil {
+		cb := q.Branch.Page
+		q.Branch.Page = func(branch, owner *contentBranchNode, s string, n *contentNode) bool {
+			if q.BranchExclude(s, n) {
+				return true
+			}
+			return cb(branch, owner, s, n)
+		}
 	}
 
 	var (
@@ -476,6 +492,8 @@ type sectionMapQuery struct {
 	SectionsFunc func(sections []*contentBranchNode)
 	// Global node filter. Return true to skip.
 	Exclude contentTreeNodeCallback
+	// Branch node filter. Return true to skip.
+	BranchExclude contentTreeNodeCallback
 	// Handle branch (sections and taxonomies) nodes.
 	Branch sectionMapQueryCallBacks
 	// Handle leaf nodes (pages)
@@ -525,16 +543,16 @@ func validateSectionMapKey(key string) error {
 		return nil
 	}
 
-	if len(key) < 3 {
-		return errors.New("too short key")
+	if len(key) < 2 {
+		return errors.Errorf("too short key: %q", key)
 	}
 
 	if key[0] != '/' {
-		return errors.New("key must start with '/'")
+		return errors.Errorf("key must start with '/': %q", key)
 	}
 
 	if key[len(key)-1] == '/' {
-		return errors.New("key must not end with '/'")
+		return errors.Errorf("key must not end with '/': %q", key)
 	}
 
 	return nil

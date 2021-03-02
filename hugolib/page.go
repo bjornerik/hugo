@@ -195,6 +195,14 @@ func (p *pageState) getRegularPagesRecursive() page.Pages {
 	return b.getRegularPagesRecursive()
 }
 
+func (p *pageState) getRegularPages() page.Pages {
+	b := p.bucket
+	if b == nil {
+		return nil
+	}
+	return b.getRegularPages()
+}
+
 func (p *pageState) getPagesAndSections() page.Pages {
 	b := p.bucket
 	if b == nil {
@@ -228,7 +236,7 @@ func (p *pageState) RegularPages() page.Pages {
 		switch p.Kind() {
 		case page.KindPage:
 		case page.KindSection, page.KindHome, page.KindTaxonomy:
-			pages = p.getPagesAndSections()
+			pages = p.getRegularPages()
 		case page.KindTerm:
 			all := p.Pages()
 			for _, p := range all {

@@ -452,17 +452,7 @@ func applyDeps(cfg deps.DepsCfg, sites ...*Site) error {
 			}
 			s.siteConfigConfig = siteConfig
 
-			pm := &pageMap{
-				cfg: contentMapConfig{
-					lang:                 s.Lang(),
-					taxonomyConfig:       s.siteCfg.taxonomiesConfig.Values(),
-					taxonomyDisabled:     !s.isEnabled(page.KindTerm),
-					taxonomyTermDisabled: !s.isEnabled(page.KindTaxonomy),
-					pageDisabled:         !s.isEnabled(page.KindPage),
-				},
-				s:          s,
-				sectionMap: newSectionMap(),
-			}
+			pm := newPageMap(s)
 
 			s.PageCollections = newPageCollections(pm)
 
@@ -755,24 +745,65 @@ func (h *HugoSites) renderCrossSitesRobotsTXT() error {
 	return s.renderAndWritePage(&s.PathSpec.ProcessingStats.Pages, "Robots Txt", "robots.txt", p, templ)
 }
 
-func (h *HugoSites) removePageByFilename(filename string) {
-	panic("TODO1")
-	/*
-		h.getContentMaps().withMaps(func(m *pageMap) error {
-			m.deleteBundleMatching(func(b *contentNode) bool {
-				if b.p == nil {
-					return false
-				}
+func (h *HugoSites) removePageByFilename(filename string) error {
+	exclude := func(s string, n *contentNode) bool {
+		if n.p == nil {
+			return true
+		}
 
-				if b.fi == nil {
-					return false
-				}
+		if n.fi == nil {
+			return true
+		}
 
-				return b.fi.Meta().Filename() == filename
-			})
-			return nil
-		})
-	*/
+		return n.fi.Meta().Filename() != filename
+
+	}
+
+	return h.getContentMaps().withMaps(func(m *pageMap) error {
+		// TODO1 consolidate these delete constructs?
+		var sectionsToDelete []string
+		var pagesToDelete []*contentTreeRef
+
+		q := sectionMapQuery{
+			Exclude: exclude,
+			Branch: sectionMapQueryCallBacks{
+				Key: newSectionMapQueryKey("", true),
+				Page: func(branch, owner *contentBranchNode, s string, n *contentNode) bool {
+					sectionsToDelete = append(sectionsToDelete, s)
+					return false
+				},
+			},
+			Leaf: sectionMapQueryCallBacks{
+				Page: func(branch, owner *contentBranchNode, s string, n *contentNode) bool {
+					pagesToDelete = append(pagesToDelete, n.p.treeRef)
+					return false
+				},
+			},
+		}
+
+		if err := m.Walk(q); err != nil {
+			return err
+		}
+
+		// Delete pages and sections marked for deletion.
+		for _, p := range pagesToDelete {
+			p.branch.pages.nodes.Delete(p.key)
+			p.branch.pageResources.nodes.Delete(p.key + "/")
+			if p.branch.n.fi == nil && p.branch.pages.nodes.Len() == 0 {
+				// Delete orphan section.
+				sectionsToDelete = append(sectionsToDelete, p.branch.key)
+			}
+		}
+
+		for _, s := range sectionsToDelete {
+			m.sections.Delete(s)
+			m.sections.DeletePrefix(s + "/")
+		}
+
+		return nil
+
+	})
+
 }
 
 func (h *HugoSites) createPageCollections() error {

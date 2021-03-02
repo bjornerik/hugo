@@ -946,6 +946,29 @@ func (c *contentTreeRef) getRegularPagesRecursive() page.Pages {
 	return pas
 }
 
+func (c *contentTreeRef) getRegularPages() page.Pages {
+	var pas page.Pages
+
+	q := sectionMapQuery{
+		Exclude: c.n.p.m.getListFilter(true),
+		Branch: sectionMapQueryCallBacks{
+			Key: newSectionMapQueryKey(c.key, false),
+		},
+		Leaf: sectionMapQueryCallBacks{
+			Page: func(branch, owner *contentBranchNode, s string, n *contentNode) bool {
+				pas = append(pas, n.p)
+				return false
+			},
+		},
+	}
+
+	c.m.Walk(q)
+
+	page.SortByDefault(pas)
+
+	return pas
+}
+
 func (c *contentTreeRef) getPagesAndSections() page.Pages {
 	var pas page.Pages
 
@@ -967,8 +990,9 @@ func (c *contentTreeRef) getSections() page.Pages {
 	var pas page.Pages
 
 	q := sectionMapQuery{
-		NoRecurse: true,
-		Exclude:   c.n.p.m.getListFilter(true),
+		NoRecurse:     true,
+		Exclude:       c.n.p.m.getListFilter(true),
+		BranchExclude: noTaxonomiesFilter,
 		Branch: sectionMapQueryCallBacks{
 			Key: newSectionMapQueryKey(c.key+"/", true),
 			Page: func(branch, owner *contentBranchNode, s string, n *contentNode) bool {

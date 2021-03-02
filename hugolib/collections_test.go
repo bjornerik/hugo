@@ -86,7 +86,6 @@ tags_weight: %d
 		"pageGroups:2:page.PagesGroup:Page(/page1.md)/Page(/page2.md)",
 		`weightedPages:2::page.WeightedPages:[WeightedPage(10,"Page") WeightedPage(20,"Page")]`)
 }
-
 func TestUnionFunc(t *testing.T) {
 	c := qt.New(t)
 
@@ -97,19 +96,10 @@ tags: ["blue", "green"]
 tags_weight: %d
 ---
 `
-
-	bluePageContent := `
----
-title: "Blue Page"
-tags: ["blue"]
-tags_weight: %d
----
-
-`
 	b := newTestSitesBuilder(t)
 	b.WithSimpleConfigFile().
 		WithContent("page1.md", fmt.Sprintf(pageContent, 10), "page2.md", fmt.Sprintf(pageContent, 20),
-			"page3.md", fmt.Sprintf(pageContent, 30), "page5.md", fmt.Sprintf(bluePageContent, 10)).
+			"page3.md", fmt.Sprintf(pageContent, 30)).
 		WithTemplatesAdded("index.html", `
 {{ $unionPages := first 2 .Site.RegularPages | union .Site.RegularPages  }}
 {{ $unionWeightedPages := .Site.Taxonomies.tags.blue | union .Site.Taxonomies.tags.green }}
@@ -119,11 +109,11 @@ tags_weight: %d
 	b.CreateSites().Build(BuildCfg{})
 
 	c.Assert(len(b.H.Sites), qt.Equals, 1)
-	c.Assert(len(b.H.Sites[0].RegularPages()), qt.Equals, 4)
+	c.Assert(len(b.H.Sites[0].RegularPages()), qt.Equals, 3)
 
 	b.AssertFileContent("public/index.html",
-		"unionPages: page.Pages 4",
-		"unionWeightedPages: page.WeightedPages 4")
+		"unionPages: page.Pages 3",
+		"unionWeightedPages: page.WeightedPages 6")
 }
 
 func TestCollectionsFuncs(t *testing.T) {

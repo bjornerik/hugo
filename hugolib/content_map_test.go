@@ -174,13 +174,17 @@ func TestContentMapSite(t *testing.T) {
 title: "Page %d"
 date: "2019-06-0%d"	
 lastMod: "2019-06-0%d"
-categories: ["funny"]
+categories: [%q]
 ---
 
 Page content.
 `
 	createPage := func(i int) string {
-		return fmt.Sprintf(pageTempl, i, i, i+1)
+		return fmt.Sprintf(pageTempl, i, i, i+1, "funny")
+	}
+
+	createPageInCategory := func(i int, category string) string {
+		return fmt.Sprintf(pageTempl, i, i, i+1, category)
 	}
 
 	draftTemplate := `---
@@ -219,8 +223,8 @@ Home Content.
 	b.WithContent("blog/draftsection/sub/_index.md", createPage(12))
 	b.WithContent("blog/draftsection/sub/page.md", createPage(13))
 	b.WithContent("docs/page6.md", createPage(11))
-	b.WithContent("tags/_index.md", createPage(32))
-	b.WithContent("overlap/_index.md", createPage(33))
+	b.WithContent("tags/_index.md", createPageInCategory(32, "sad"))
+	b.WithContent("overlap/_index.md", createPageInCategory(33, "sad"))
 	b.WithContent("overlap2/_index.md", createPage(34))
 
 	b.WithTemplatesAdded("layouts/index.html", `
@@ -255,13 +259,13 @@ InSection: true: {{ $page.InSection $blog }} false: {{ $page.InSection $blogSub 
 Next: {{ $page2.Next.RelPermalink }}
 NextInSection: {{ $page2.NextInSection.RelPermalink }}
 Pages: {{ range $blog.Pages }}{{ .RelPermalink }}|{{ end }}
-Sections: {{ range $home.Sections }}{{ .RelPermalink }}|{{ end }}
-Categories: {{ range .Site.Taxonomies.categories }}{{ .Page.RelPermalink }}; {{ .Page.Title }}; {{ .Count }}|{{ end }}
-Category Terms:  {{ $categories.Kind}}: {{ range $categories.Data.Terms.Alphabetical }}{{ .Page.RelPermalink }}; {{ .Page.Title }}; {{ .Count }}|{{ end }}
-Category Funny:  {{ $funny.Kind}}; {{ $funny.Data.Term }}: {{ range $funny.Pages }}{{ .RelPermalink }};|{{ end }}
+Sections: {{ range $home.Sections }}{{ .RelPermalink }}|{{ end }}:END
+Categories: {{ range .Site.Taxonomies.categories }}{{ .Page.RelPermalink }}; {{ .Page.Title }}; {{ .Count }}|{{ end }}:END
+Category Terms:  {{ $categories.Kind}}: {{ range $categories.Data.Terms.Alphabetical }}{{ .Page.RelPermalink }}; {{ .Page.Title }}; {{ .Count }}|{{ end }}:END
+Category Funny:  {{ $funny.Kind}}; {{ $funny.Data.Term }}: {{ range $funny.Pages }}{{ .RelPermalink }};|{{ end }}:END
 Pag Num Pages: {{ len .Paginator.Pages }}
 Pag Blog Num Pages: {{ len $blog.Paginator.Pages }}
-Blog Num RegularPages: {{ len $blog.RegularPages }}
+Blog Num RegularPages: {{ len $blog.RegularPages }}|{{ range $blog.RegularPages }}P: {{ .RelPermalink }}|{{ end }}
 Blog Num Pages: {{ len $blog.Pages }}
 
 Draft1: {{ if (.Site.GetPage "blog/subsection/draft") }}FOUND{{ end }}|
@@ -298,10 +302,10 @@ Draft5: {{ if (.Site.GetPage "blog/draftsection/sub/page") }}FOUND{{ end }}|
         Next: /blog/page3/
         NextInSection: /blog/page3/
         Pages: /blog/page3/|/blog/subsection/|/blog/page2/|/blog/page1/|/blog/bundle/|
-        Sections: /blog/|/docs/|
-        Categories: /categories/funny/; funny; 11|
-        Category Terms:  taxonomy: /categories/funny/; funny; 11|
- 		Category Funny:  term; funny: /blog/subsection/page4/;|/blog/page3/;|/blog/subsection/;|/blog/page2/;|/blog/page1/;|/blog/subsection/page5/;|/docs/page6/;|/blog/bundle/;|;|
+        Sections: /blog/|/docs/|/overlap/|/overlap2/|:END
+		Categories: /categories/funny/; funny; 9|/categories/sad/; sad; 2|:END
+        Category Terms:  taxonomy: /categories/funny/; funny; 9|/categories/sad/; sad; 2|:END
+		Category Funny:  term; funny: /blog/subsection/page4/;|/blog/page3/;|/blog/subsection/;|/blog/page2/;|/blog/page1/;|/blog/subsection/page5/;|/docs/page6/;|/blog/bundle/;|/overlap2/;|:END
  		Pag Num Pages: 7
         Pag Blog Num Pages: 4
         Blog Num RegularPages: 4
