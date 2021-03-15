@@ -55,7 +55,8 @@ require (
 	github.com/spf13/jwalterweatherman v1.1.0
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.7.1
-	github.com/tdewolff/minify/v2 v2.9.13
+	github.com/tdewolff/minify/v2 v2.9.14
+	github.com/tdewolff/parse/v2 v2.5.13 // indirect
 	github.com/yuin/goldmark v1.3.2
 	github.com/yuin/goldmark-highlighting v0.0.0-20200307114337-60d527fdb691
 	gocloud.dev v0.20.0
